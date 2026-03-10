@@ -65,7 +65,7 @@ if [[ "$MODE" == "auto" ]]; then
     HAS_RUNNER=false
     HAS_FRONTEND=false
 
-    if echo "$ALL_CHANGES" | grep -qE '^src/runner/|^src/shared/|^projects\.json|^prompts/|^permissions/|\.env'; then
+    if echo "$ALL_CHANGES" | grep -qE '^src/runner/|^src/shared/|^projects(\.local)?\.json|^prompts/|^permissions/|\.env'; then
         HAS_RUNNER=true
     fi
     if echo "$ALL_CHANGES" | grep -qE '^src/web/|^src/server/|^src/shared/|^index\.html|^vite\.config|^tailwind'; then

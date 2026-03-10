@@ -1,6 +1,6 @@
 // src/runner/config.ts
 import { config as loadEnv } from 'dotenv'
-import { readFileSync, writeFileSync } from 'fs'
+import { existsSync, readFileSync, writeFileSync } from 'fs'
 import { dirname, isAbsolute, resolve } from 'path'
 import { fileURLToPath } from 'url'
 import type { ProjectRegistry } from '../shared/types.js'
@@ -41,10 +41,18 @@ export const config = {
   codexBinary: env('AC_CODEX_BINARY', 'codex'),
 }
 
+/** Resolve the actual projects file: prefer projects.local.json over projects.json */
+function resolveProjectsPath(): string {
+  const base = config.projectsPath
+  const localPath = base.replace(/\.json$/, '.local.json')
+  return existsSync(localPath) ? localPath : base
+}
+
 export function loadProjectRegistry(): ProjectRegistry {
-  const raw = readFileSync(config.projectsPath, 'utf-8')
+  const effectivePath = resolveProjectsPath()
+  const raw = readFileSync(effectivePath, 'utf-8')
   const registry = JSON.parse(raw) as ProjectRegistry
-  const projectsDir = dirname(config.projectsPath)
+  const projectsDir = dirname(effectivePath)
   for (const project of registry.projects) {
     if (!isAbsolute(project.todoFile)) {
       project.todoFile = resolve(projectsDir, project.todoFile)
@@ -54,5 +62,6 @@ export function loadProjectRegistry(): ProjectRegistry {
 }
 
 export function saveProjectRegistry(registry: ProjectRegistry): void {
-  writeFileSync(config.projectsPath, JSON.stringify(registry, null, 2) + '\n', 'utf-8')
+  const effectivePath = resolveProjectsPath()
+  writeFileSync(effectivePath, JSON.stringify(registry, null, 2) + '\n', 'utf-8')
 }
