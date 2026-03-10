@@ -1,0 +1,9 @@
+node_modules/
+dist/
+.env
+logs/
+sessions/
+*.log
+.worktrees/
+test-results/
+e2e/screenshots/

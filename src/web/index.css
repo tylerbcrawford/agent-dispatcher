@@ -1,0 +1,88 @@
+@import "tailwindcss";
+
+@theme {
+  /* ── Fonts ─────────────────────────────────── */
+  --font-sans: "Inter", ui-sans-serif, system-ui, sans-serif;
+  --font-heading: "Space Grotesk", "Inter", ui-sans-serif, system-ui, sans-serif;
+  --font-mono: "JetBrains Mono", ui-monospace, monospace;
+
+  /* ── Spacing (design guide: 4px base) ──────── */
+  --spacing: 0.25rem;
+
+  /* ── Neutrals (true monochromatic, no blue tint) ── */
+  --color-gray-50: #FAFAFA;
+  --color-gray-100: #F5F5F5;
+  --color-gray-200: #E0E0E0;
+  --color-gray-300: #CCCCCC;
+  --color-gray-400: #A0A0A0;
+  --color-gray-500: #666666;
+  --color-gray-600: #444444;
+  --color-gray-700: #2A2A2A;
+  --color-gray-800: #1C1C1C;
+  --color-gray-900: #141414;
+  --color-gray-950: #000000;
+
+  /* ── Blue (#00A9E0 — interactive, primary accent) ── */
+  --color-blue-300: #4DC4EA;
+  --color-blue-400: #26B7E5;
+  --color-blue-500: #00A9E0;
+  --color-blue-600: #0098C9;
+  --color-blue-700: #007DA6;
+  --color-blue-800: #005C7A;
+  --color-blue-900: #003347;
+  --color-blue-950: #001A24;
+
+  /* ── Green (#00C389 — success, positive) ── */
+  --color-green-300: #4DD6AA;
+  --color-green-400: #26CCA0;
+  --color-green-500: #00C389;
+  --color-green-600: #00AD7A;
+  --color-green-700: #008F65;
+  --color-green-800: #006A4B;
+  --color-green-900: #003A29;
+  --color-green-950: #001D14;
+
+  /* ── Yellow (#FFD700 — warnings, highlights) ── */
+  --color-yellow-300: #FFE44D;
+  --color-yellow-400: #FFDD26;
+  --color-yellow-500: #FFD700;
+  --color-yellow-600: #E6C200;
+  --color-yellow-700: #B89B00;
+  --color-yellow-800: #8C7500;
+  --color-yellow-900: #4D3F00;
+  --color-yellow-950: #262000;
+
+  /* ── Red (#F9423A — errors, destructive) ── */
+  --color-red-300: #FB7A74;
+  --color-red-400: #FA5B54;
+  --color-red-500: #F9423A;
+  --color-red-600: #E03B34;
+  --color-red-700: #B82F2A;
+  --color-red-800: #7A1F1C;
+  --color-red-900: #451210;
+  --color-red-950: #230908;
+
+  /* ── Purple (review states, 5th accent) ── */
+  --color-purple-300: #C4B5FD;
+  --color-purple-400: #A78BFA;
+  --color-purple-500: #8B5CF6;
+  --color-purple-600: #7C3AED;
+  --color-purple-900: #2E1065;
+  --color-purple-950: #1A0533;
+}
+
+@layer base {
+  h1, h2, h3 {
+    font-family: var(--font-heading);
+  }
+}
+
+@layer utilities {
+  .pb-safe { padding-bottom: env(safe-area-inset-bottom, 0px); }
+}
+
+/* Override highlight.js background to be transparent inside our styled <pre> */
+pre code.hljs {
+  background: transparent;
+  padding: 0;
+}

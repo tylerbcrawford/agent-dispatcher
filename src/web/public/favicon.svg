@@ -1,0 +1,13 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32">
+  <rect width="32" height="32" rx="6" fill="#000000"/>
+  <!-- Spokes from conductor to agents -->
+  <line x1="16" y1="15" x2="16" y2="6" stroke="#00A9E0" stroke-width="2" stroke-linecap="round"/>
+  <line x1="16" y1="15" x2="7.5" y2="22" stroke="#00A9E0" stroke-width="2" stroke-linecap="round"/>
+  <line x1="16" y1="15" x2="24.5" y2="22" stroke="#00A9E0" stroke-width="2" stroke-linecap="round"/>
+  <!-- Agent nodes (outline = subordinate) -->
+  <circle cx="16" cy="6" r="3" fill="none" stroke="#00A9E0" stroke-width="2"/>
+  <circle cx="7.5" cy="22" r="3" fill="none" stroke="#00A9E0" stroke-width="2"/>
+  <circle cx="24.5" cy="22" r="3" fill="none" stroke="#00A9E0" stroke-width="2"/>
+  <!-- Conductor hub (filled = primary) -->
+  <circle cx="16" cy="15" r="4" fill="#00A9E0"/>
+</svg>

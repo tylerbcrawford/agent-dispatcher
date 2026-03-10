@@ -1,0 +1,12 @@
+{
+  "projects": [
+    {
+      "id": "example",
+      "name": "Example Project",
+      "todoFile": "./todo-example.md",
+      "icon": "📋",
+      "active": true
+    }
+  ],
+  "defaultProject": "example"
+}

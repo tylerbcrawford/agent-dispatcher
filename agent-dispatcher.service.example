@@ -1,0 +1,20 @@
+[Unit]
+Description=Agent Dispatcher Runner
+After=network.target
+
+[Service]
+Type=simple
+User=<YOUR_USER>
+WorkingDirectory=<YOUR_PATH>/agent-dispatcher
+ExecStart=/usr/bin/node --import tsx src/runner/index.ts
+Restart=on-failure
+RestartSec=5
+Environment=NODE_ENV=production
+# Include paths to your CLI binaries (claude, gemini, codex)
+Environment=PATH=/usr/local/bin:/usr/bin:/bin
+# Required for Codex CLI keyring access (if using Codex provider)
+# Environment=DBUS_SESSION_BUS_ADDRESS=unix:path=/run/user/<YOUR_UID>/bus
+# Environment=XDG_RUNTIME_DIR=/run/user/<YOUR_UID>
+
+[Install]
+WantedBy=multi-user.target

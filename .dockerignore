@@ -1,0 +1,12 @@
+node_modules
+src
+.env
+.git
+sessions
+prompts
+permissions
+*.md
+*.service
+vitest.config.ts
+vite.config.ts
+tsconfig*.json
