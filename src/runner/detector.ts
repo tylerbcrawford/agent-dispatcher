@@ -198,3 +198,28 @@ export function parseStreamJsonSessionId(line: string): string | null {
   }
   return null
 }
+
+/**
+ * True if an output chunk contains a permission-profile tool denial — i.e. the
+ * agent attempted a tool blocked by `--disallowedTools`. Claude emits a
+ * `tool_result` like `<tool_use_error>Error: No such tool available: Write.
+ * Write exists but is not enabled in this context...</tool_use_error>`. The
+ * substring "is not enabled in this context" is specific to a disallowed-tool
+ * denial, so it won't false-trip on a benign tool error (e.g. a missing file).
+ * (Captured empirically 2026-06-20.)
+ */
+export function isPermissionDenial(chunk: string): boolean {
+  return chunk.includes('is not enabled in this context')
+}
+
+/**
+ * Track consecutive profile-denials across stream chunks for the token-burn
+ * watchdog: +1 on a denial, reset to 0 when a tool actually succeeds
+ * (`"is_error":false` — real progress), unchanged on neutral text/thinking
+ * (a flailing agent narrates between denials, so text must NOT reset the count).
+ */
+export function updateDenialCount(prev: number, chunk: string): number {
+  if (isPermissionDenial(chunk)) return prev + 1
+  if (/"is_error"\s*:\s*false/.test(chunk)) return 0
+  return prev
+}

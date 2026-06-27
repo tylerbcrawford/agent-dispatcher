@@ -2,8 +2,15 @@
 import { readFileSync, writeFileSync } from 'fs'
 import type { Task, AgentSession, ClientMessage } from '../../shared/types.js'
 import { parseTodoFile, deriveTaskBucket, parseTimeMinutes } from '../parser.js'
-import { serializeTodoFile } from '../serializer.js'
+import { updateTaskInContent, insertTaskIntoContent, removeTaskFromContent, type TaskPatch } from '../task-editor.js'
 import type { HandlerContext } from '../handler-context.js'
+
+// NOTE: all writes go through the surgical task-editor (updateTaskInContent / insertTaskIntoContent
+// / removeTaskFromContent), NOT serializeTodoFile. The serializer reconstructs the whole file from
+// the lossy parsed model and would strip **Source:**/**Result:**/**Update:** lines, tables, and
+// multi-paragraph descriptions. The surgical editor touches only the changed task's field lines.
+// `description` and `category` are intentionally NOT forwarded to the editor — they are vault-authoring
+// concerns (agent-prompt bodies / section grouping) edited in the vault, not surgically persisted here.
 
 export function handleCreateTask(ctx: HandlerContext, msg: Extract<ClientMessage, { type: 'create_task' }>) {
   const project = ctx.registry.projects.find(p => p.id === msg.projectId)
@@ -32,13 +39,14 @@ export function handleCreateTask(ctx: HandlerContext, msg: Extract<ClientMessage
       status: msg.task.status,
       description: msg.task.description,
       planLink: msg.task.planLink ?? null,
+      hasPlan: false,
       affects: msg.task.affects ?? [],
       depends: msg.task.depends ?? [],
       bucket: deriveTaskBucket(msg.task.status, timeMinutes),
+      score: null,
     }
 
-    const allTasks = [...parsed.tasks, newTask]
-    const serialized = serializeTodoFile(content, allTasks, parsed.frontmatter)
+    const serialized = insertTaskIntoContent(content, newTask)
     writeFileSync(project.todoFile, serialized, 'utf-8')
 
     ctx.loadTasks()
@@ -61,30 +69,22 @@ export function handleUpdateTask(ctx: HandlerContext, msg: Extract<ClientMessage
     const content = readFileSync(project.todoFile, 'utf-8')
     const parsed = parseTodoFile(content)
 
-    const taskIdx = parsed.tasks.findIndex(t => t.id === msg.taskId)
-    if (taskIdx === -1) {
+    if (!parsed.tasks.some(t => t.id === msg.taskId)) {
       ctx.broadcast({ type: 'task_write_error', projectId: msg.projectId, message: `Task #${msg.taskId} not found` })
       return
     }
 
-    const task = parsed.tasks[taskIdx]
-    if (msg.patch.name !== undefined) task.name = msg.patch.name
-    if (msg.patch.emoji !== undefined) task.emoji = msg.patch.emoji
-    if (msg.patch.category !== undefined) task.category = msg.patch.category
-    if (msg.patch.priority !== undefined) task.priority = msg.patch.priority
-    if (msg.patch.timeEstimate !== undefined) {
-      task.timeEstimate = msg.patch.timeEstimate
-      task.timeMinutes = parseTimeMinutes(msg.patch.timeEstimate)
-    }
-    if (msg.patch.status !== undefined) task.status = msg.patch.status
-    if (msg.patch.description !== undefined) task.description = msg.patch.description
-    if (msg.patch.planLink !== undefined) task.planLink = msg.patch.planLink
-    if (msg.patch.affects !== undefined) task.affects = msg.patch.affects
-    if (msg.patch.depends !== undefined) task.depends = msg.patch.depends
+    const patch: TaskPatch = {}
+    if (msg.patch.name !== undefined) patch.name = msg.patch.name
+    if (msg.patch.emoji !== undefined) patch.emoji = msg.patch.emoji
+    if (msg.patch.priority !== undefined) patch.priority = msg.patch.priority
+    if (msg.patch.timeEstimate !== undefined) patch.timeEstimate = msg.patch.timeEstimate
+    if (msg.patch.status !== undefined) patch.status = msg.patch.status
+    if (msg.patch.planLink !== undefined) patch.planLink = msg.patch.planLink
+    if (msg.patch.affects !== undefined) patch.affects = msg.patch.affects
+    if (msg.patch.depends !== undefined) patch.depends = msg.patch.depends
 
-    task.bucket = deriveTaskBucket(task.status, task.timeMinutes)
-
-    const serialized = serializeTodoFile(content, parsed.tasks, parsed.frontmatter)
+    const serialized = updateTaskInContent(content, msg.taskId, patch)
     writeFileSync(project.todoFile, serialized, 'utf-8')
 
     ctx.loadTasks()
@@ -107,13 +107,12 @@ export function handleDeleteTask(ctx: HandlerContext, msg: Extract<ClientMessage
     const content = readFileSync(project.todoFile, 'utf-8')
     const parsed = parseTodoFile(content)
 
-    const remaining = parsed.tasks.filter(t => t.id !== msg.taskId)
-    if (remaining.length === parsed.tasks.length) {
+    if (!parsed.tasks.some(t => t.id === msg.taskId)) {
       ctx.broadcast({ type: 'task_write_error', projectId: msg.projectId, message: `Task #${msg.taskId} not found` })
       return
     }
 
-    const serialized = serializeTodoFile(content, remaining, parsed.frontmatter)
+    const serialized = removeTaskFromContent(content, msg.taskId)
     writeFileSync(project.todoFile, serialized, 'utf-8')
 
     ctx.loadTasks()
@@ -137,14 +136,19 @@ export function handleDeleteTasks(ctx: HandlerContext, msg: Extract<ClientMessag
     const parsed = parseTodoFile(content)
     const idsToDelete = new Set(msg.taskIds)
 
-    const remaining = parsed.tasks.filter(t => !idsToDelete.has(t.id))
-    const deletedCount = parsed.tasks.length - remaining.length
+    let serialized = content
+    let deletedCount = 0
+    for (const task of parsed.tasks) {
+      if (idsToDelete.has(task.id)) {
+        serialized = removeTaskFromContent(serialized, task.id)
+        deletedCount++
+      }
+    }
     if (deletedCount === 0) {
       ctx.broadcast({ type: 'task_write_error', projectId: msg.projectId, message: `No matching tasks found` })
       return
     }
 
-    const serialized = serializeTodoFile(content, remaining, parsed.frontmatter)
     writeFileSync(project.todoFile, serialized, 'utf-8')
 
     ctx.loadTasks()
@@ -163,11 +167,9 @@ export function setTaskStatus(ctx: HandlerContext, session: AgentSession, status
   try {
     const content = readFileSync(project.todoFile, 'utf-8')
     const parsed = parseTodoFile(content)
-    const task = parsed.tasks.find(t => t.id === session.taskId)
-    if (!task) return
-    task.status = status
-    task.bucket = deriveTaskBucket(status, task.timeMinutes)
-    writeFileSync(project.todoFile, serializeTodoFile(content, parsed.tasks, parsed.frontmatter), 'utf-8')
+    if (!parsed.tasks.some(t => t.id === session.taskId)) return
+    const serialized = updateTaskInContent(content, session.taskId, { status })
+    writeFileSync(project.todoFile, serialized, 'utf-8')
     ctx.loadTasks()
     ctx.broadcast({ type: 'tasks', projectId: session.projectId, tasks: ctx.tasks.filter(t => t.projectId === session.projectId) })
   } catch (err) {

@@ -63,12 +63,12 @@ describe('composePrompt', () => {
     const base = library.bases.find(b => b.id === 'implement')!
     const composed = composePrompt(base, [], {
       id: 1, name: 'Test Task', description: 'Test desc.',
-      planContent: null, projectName: 'Media Server',
-      projectFolder: '01_Projects/media-server', taskSlug: 'test-task',
+      planContent: null, projectName: 'Website Redesign',
+      projectFolder: 'projects/example', taskSlug: 'test-task',
       projectDescription: '',
     })
     expect(composed).toContain('Test Task')
-    expect(composed).toContain('Media Server')
+    expect(composed).toContain('Website Redesign')
     expect(composed).toContain('Write tests first')
   })
 
@@ -94,12 +94,12 @@ describe('renderPrompt', () => {
     const template = 'Task: ${name}\nProject: ${projectName}\n${description}'
     const result = renderPrompt(template, {
       id: 1, name: 'API Key Rotation', description: 'Rotate all keys.',
-      planContent: null, projectName: 'Media Server',
-      projectFolder: '01_Projects/media-server', taskSlug: 'api-key-rotation',
+      planContent: null, projectName: 'Website Redesign',
+      projectFolder: 'projects/example', taskSlug: 'api-key-rotation',
       projectDescription: '',
     })
     expect(result).toContain('Task: API Key Rotation')
-    expect(result).toContain('Project: Media Server')
+    expect(result).toContain('Project: Website Redesign')
   })
 
   it('handles planContent conditional', () => {

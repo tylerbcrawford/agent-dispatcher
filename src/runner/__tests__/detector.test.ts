@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest'
-import { detectSignal, detectQuestion, parseStreamJsonSessionId, parseVerificationReport } from '../detector.js'
+import { detectSignal, detectQuestion, parseStreamJsonSessionId, parseVerificationReport, isPermissionDenial, updateDenialCount } from '../detector.js'
 
 describe('detectSignal', () => {
   it('detects COMPLETED signal', () => {
@@ -21,7 +21,7 @@ describe('detectSignal', () => {
   })
 
   it('returns null for normal output', () => {
-    expect(detectSignal('Analyzing sonarr config...')).toBeNull()
+    expect(detectSignal('Analyzing project config...')).toBeNull()
   })
 
   it('ignores [COMPLETED] in echoed prompt (stream-json user message)', () => {
@@ -151,5 +151,38 @@ describe('parseStreamJsonSessionId', () => {
   it('extracts thread ID from codex thread/started event', () => {
     const line = '{"method":"thread/started","params":{"thread":{"id":"thr_abc123"}}}'
     expect(parseStreamJsonSessionId(line)).toBe('thr_abc123')
+  })
+})
+
+// Real stream-json fixtures captured 2026-06-20 from `claude --print --disallowedTools=Write,Bash`
+const DENIAL = '{"type":"user","message":{"content":[{"type":"tool_result","is_error":true,"content":[{"type":"text","text":"<tool_use_error>Error: No such tool available: Write. Write exists but is not enabled in this context. Use one of the available tools instead.</tool_use_error>"}]}]}}'
+const SUCCESS = '{"type":"user","message":{"content":[{"type":"tool_result","is_error":false,"content":[{"type":"text","text":"file contents here"}]}]}}'
+const FILE_ERROR = '{"type":"user","message":{"content":[{"type":"tool_result","is_error":true,"content":[{"type":"text","text":"<tool_use_error>File does not exist.</tool_use_error>"}]}]}}'
+
+describe('isPermissionDenial', () => {
+  it('detects a profile-denied tool result', () => {
+    expect(isPermissionDenial(DENIAL)).toBe(true)
+  })
+  it('does not flag a successful tool result', () => {
+    expect(isPermissionDenial(SUCCESS)).toBe(false)
+  })
+  it('does not flag a non-denial tool error (missing file is is_error:true but not a denial)', () => {
+    expect(isPermissionDenial(FILE_ERROR)).toBe(false)
+  })
+  it('does not flag plain assistant text', () => {
+    expect(isPermissionDenial('I will now use the Write tool.')).toBe(false)
+  })
+})
+
+describe('updateDenialCount', () => {
+  it('increments on a denial chunk', () => {
+    expect(updateDenialCount(0, DENIAL)).toBe(1)
+    expect(updateDenialCount(2, DENIAL)).toBe(3)
+  })
+  it('resets to 0 on a successful tool result (agent made progress)', () => {
+    expect(updateDenialCount(2, SUCCESS)).toBe(0)
+  })
+  it('leaves the count unchanged on neutral output (text/thinking between denials)', () => {
+    expect(updateDenialCount(2, 'thinking about the problem...')).toBe(2)
   })
 })

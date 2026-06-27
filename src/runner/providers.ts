@@ -70,10 +70,12 @@ export interface SpawnCommandArgs {
   prompt: string
   model: string
   providerId: ProviderId
-  allowedTools?: string       // Claude: CSV of tool names
+  allowedTools?: string       // Claude: CSV of tool names to auto-approve
+  disallowedTools?: string    // Claude: CSV of tool names to hard-deny (overrides inherited allows)
   permissionProfile?: string  // Used by Gemini for approval-mode mapping
   resumeId?: string
   forkSession?: boolean
+  maxBudgetUsd?: number        // Claude: hard per-spawn dollar cap (token-burn backstop)
 }
 
 /** Map a permission profile name to Gemini --approval-mode flag */
@@ -116,11 +118,23 @@ function buildClaudeArgs(args: SpawnCommandArgs): string[] {
     cliArgs.push(`--allowedTools=${args.allowedTools}`)
   }
 
+  // Hard restriction: deny rules override the broad permissions.allow the agent
+  // inherits from settings.json, so this is what actually enforces read-only.
+  if (args.disallowedTools) {
+    cliArgs.push(`--disallowedTools=${args.disallowedTools}`)
+  }
+
   if (args.resumeId) {
     cliArgs.push('--resume', args.resumeId)
     if (args.forkSession) {
       cliArgs.push('--fork-session')
     }
+  }
+
+  // Hard dollar cap per spawn — aborts a runaway agent even under subscription
+  // auth (verified 2026-06-20: result subtype `error_max_budget_usd`). Hard budget backstop.
+  if (args.maxBudgetUsd && args.maxBudgetUsd > 0) {
+    cliArgs.push('--max-budget-usd', String(args.maxBudgetUsd))
   }
 
   cliArgs.push(args.prompt)

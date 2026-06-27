@@ -30,6 +30,7 @@ export interface HandlerContext {
   loadTasks: () => void
   reloadPromptLibrary: () => void
   resolveAllowedTools: (profileName: string) => string | undefined
+  resolveDisallowedTools: (profileName: string) => string | undefined
   saveSession: (session: AgentSession) => void
   deleteSession: (id: string) => void
   buildPromptLibraryMeta: () => PromptLibraryMeta

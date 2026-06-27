@@ -34,6 +34,23 @@ export function resolvePlanLink(
   return readFileSync(matches[0], 'utf-8')
 }
 
+/**
+ * Cheap existence check for a task's plan file — direct existsSync only, no recursive walk.
+ * Mirrors resolvePlanLink's direct paths PLUS the conventional `plans/` subfolder
+ * (projects/<project>/plans/<name>-plan.md).
+ * Returns false when the task has no explicit **Plan:** link (planLink === null).
+ */
+export function planExists(planLink: string | null, vaultPath: string, projectFolder: string): boolean {
+  if (!planLink) return false
+  const candidates = [
+    join(vaultPath, `${planLink}.md`),
+    projectFolder ? join(projectFolder, `${planLink}.md`) : null,
+    projectFolder ? join(projectFolder, 'plans', `${planLink}.md`) : null,
+    join(vaultPath, 'plans', `${planLink}.md`),
+  ].filter((p): p is string => p !== null)
+  return candidates.some(p => existsSync(p))
+}
+
 function findFilesRecursive(dir: string, targetName: string): string[] {
   const results: string[] = []
   const walk = (current: string) => {

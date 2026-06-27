@@ -6,7 +6,7 @@ import type { Task, TaskStatus, Priority, Bucket, TodoFrontmatter } from '../sha
 const FRONTMATTER_RE = /^---\n([\s\S]*?)\n---/
 const CATEGORY_RE = /^##\s+(.+)$/
 const TASK_HEADING_RE = /^###\s+(\d+)\.\s+(?:([^\x00-\x7F]\S*)\s+)?(.+)$/
-const META_RE = /\*\*Priority:\*\*\s*(\S+)\s+\w+\s*\|\s*\*\*Time:\*\*\s*(.+?)\s*\|\s*\*\*Status:\*\*\s*(.+)/
+const META_RE = /\*\*Priority:\*\*\s*(\S+)\s+\w+\s*\|\s*\*\*Time:\*\*\s*(.+?)\s*\|\s*\*\*Status:\*\*\s*(.+?)(?:\s*\|\s*\*\*Score:\*\*\s*(\d+))?\s*$/
 const PLAN_RE = /\*\*Plan:\*\*\s*(?:`([^`]+)`|\[\[([^\]]+)\]\])/
 const AFFECTS_RE = /\*\*Affects:\*\*\s*(.+)/i
 const DEPENDS_RE = /\*\*Depends:\*\*\s*(.+)/i
@@ -28,8 +28,8 @@ export function parseStatus(raw: string): TaskStatus {
   if (s.startsWith('⏸️')) return 'blocked'
   if (s.startsWith('🖐️')) return 'manual'
   if (s.startsWith('🏁')) return 'done'
-  // ✅ — check label text for Done vs Ready
-  if (s.includes('Done')) return 'done'
+  // ✅ — check label text for Done vs Ready (case-insensitive: weekly synthesis writes "✅ DONE (date)")
+  if (s.toLowerCase().includes('done')) return 'done'
   if (s.startsWith('✅')) return 'ready'
   // Backward compat: 📋 Planned → ready (plan-ready was merged into ready)
   if (s.startsWith('📋')) return 'ready'
@@ -129,6 +129,7 @@ export function parseTodoFile(content: string): ParsedTodo {
       currentTask.timeMinutes = parseTimeMinutes(currentTask.timeEstimate)
       const rawStatus = metaMatch[3].trim()
       currentTask.status = parseStatus(rawStatus)
+      currentTask.score = metaMatch[4] ? parseInt(metaMatch[4], 10) : null
       continue
     }
 
@@ -189,8 +190,10 @@ function finishTask(partial: Partial<Task>, descLines: string[], projectId: stri
     status,
     description: descLines.join(' '),
     planLink: partial.planLink || null,
+    hasPlan: false,
     affects: partial.affects || [],
     depends: partial.depends || [],
     bucket,
+    score: (partial.score as number | null) ?? null,
   })
 }

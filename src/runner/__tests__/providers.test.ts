@@ -69,6 +69,24 @@ describe('buildSpawnCommand', () => {
     expect(cmd.args).toContain('sonnet')
   })
 
+  it('emits --disallowedTools for claude when provided', () => {
+    const cmd = buildSpawnCommand({
+      prompt: 'test prompt',
+      model: 'haiku',
+      providerId: 'claude',
+      allowedTools: 'Read,Glob,Grep',
+      disallowedTools: 'Bash,Write,Edit,MultiEdit,NotebookEdit,WebFetch,WebSearch',
+    })
+    expect(cmd.args).toContain('--disallowedTools=Bash,Write,Edit,MultiEdit,NotebookEdit,WebFetch,WebSearch')
+    // prompt stays last so the variadic flag never swallows it
+    expect(cmd.args[cmd.args.length - 1]).toBe('test prompt')
+  })
+
+  it('omits --disallowedTools for claude when not provided', () => {
+    const cmd = buildSpawnCommand({ prompt: 'test', model: 'haiku', providerId: 'claude' })
+    expect(cmd.args.some(a => a.startsWith('--disallowedTools'))).toBe(false)
+  })
+
   it('returns gemini binary and args for gemini provider', () => {
     const cmd = buildSpawnCommand({
       prompt: 'test prompt',

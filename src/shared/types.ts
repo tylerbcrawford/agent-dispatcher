@@ -2,22 +2,34 @@
 
 // --- Project ---
 
+export type GroupColor = 'blue' | 'green' | 'yellow' | 'red' | 'purple' | 'gray'
+
+export interface ProjectGroup {
+  id: string            // e.g. "work", "personal"
+  name: string          // e.g. "Work", "Personal"
+  color: GroupColor      // key into static Tailwind color map
+  projectIds: string[]   // ordered list of project IDs in this group
+}
+
 export interface ProjectConfig {
-  id: string             // e.g. "mediaserver", "career"
-  name: string           // e.g. "Media Server"
+  id: string             // e.g. "my-project", "docs-site"
+  name: string           // e.g. "Website Redesign"
   todoFile: string       // Absolute path to todo-[project].md
   icon: string           // Emoji icon
   active: boolean
+  weight: number         // Global priority weight (0-100), used in scoring formula
+  weightReason: string   // Why this weight was assigned (from weekly synthesis)
 }
 
 export interface ProjectRegistry {
   projects: ProjectConfig[]
   defaultProject: string
+  groups?: ProjectGroup[]
 }
 
 // Fields for creating a project (ID derived server-side from name)
 export interface ProjectDraft {
-  name: string         // Display name, e.g. "Subgeneratorr"
+  name: string         // Display name, e.g. "Website Redesign"
   icon: string         // Emoji icon, e.g. "🎬"
   description?: string // Optional one-liner for todo frontmatter
   defaultCwd?: string  // Optional CWD override
@@ -53,10 +65,12 @@ export interface Task {
   timeMinutes: number     // Parsed numeric estimate (lower bound) for bucket derivation
   status: TaskStatus
   description: string     // Paragraph(s) below the fields
-  planLink: string | null // e.g. "sonarr-limiter-plan" (wiki-link target)
-  affects: string[]       // e.g. ["sonarr", "radarr"]
+  planLink: string | null // e.g. "rate-limiter-plan" (wiki-link target)
+  hasPlan: boolean        // true if a plan file exists for this task (computed in loadTasks)
+  affects: string[]       // e.g. ["api", "web"]
   depends: number[]       // e.g. [1, 3] — task IDs this depends on
   bucket: Bucket          // Derived from status
+  score: number | null    // Global priority score (0-100), null if unscored
 }
 
 export type Priority = 'HIGH' | 'MEDIUM' | 'LOW'
@@ -88,6 +102,7 @@ export interface TaskPatch {
   planLink?: string | null
   affects?: string[]
   depends?: number[]
+  score?: number | null
 }
 
 export type TaskStatus =
@@ -367,6 +382,8 @@ export type ServerMessage =
   | { type: 'task_write_error'; projectId: string; message: string }
   | { type: 'plan_content'; taskId: number; content: string | null }
   | { type: 'prompt_templates'; templates: PromptTemplateContent[] }
+  | { type: 'project_groups'; groups: ProjectGroup[] }
+  | { type: 'scoring_status'; status: 'scoring' | 'complete'; scoredCount?: number }
 
 // Browser → Runner
 export type ClientMessage =
@@ -391,5 +408,10 @@ export type ClientMessage =
   | { type: 'delete_project'; projectId: string }
   | { type: 'clear_completed_agents' }
   | { type: 'request_prompt_templates' }
-  | { type: 'save_prompt_template'; mode: RunMode; content: string }
+  | { type: 'save_prompt_template'; mode: RunMode; content: string; model?: string; time?: number; profile?: string }
   | { type: 'reset_prompt_template'; mode: RunMode }
+  | { type: 'update_groups'; groups: ProjectGroup[] }
+  | { type: 'update_project_weight'; projectId: string; weight: number; reason?: string }
+  | { type: 'update_project_weights_batch'; weights: Array<{ projectId: string; weight: number; reason?: string }> }
+  | { type: 'rescore_all' }
+  | { type: 'rescore_project'; projectId: string }

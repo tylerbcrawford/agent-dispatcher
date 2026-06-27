@@ -1,10 +1,40 @@
 // src/runner/spawner.ts
 import * as pty from 'node-pty'
 import { randomUUID } from 'crypto'
+import { statSync, accessSync, constants } from 'fs'
+import { join, delimiter } from 'path'
 import type { AgentSession, Task, RunMode, ExecutionMode, ProviderId } from '../shared/types.js'
 import { taskToSlug } from './prompt-library.js'
 import { config } from './config.js'
 import { buildSpawnCommand } from './providers.js'
+
+function isExecutableFile(p: string): boolean {
+  try {
+    if (!statSync(p).isFile()) return false
+    accessSync(p, constants.X_OK)
+    return true
+  } catch {
+    return false
+  }
+}
+
+/**
+ * Resolve an executable to its absolute path by scanning PATH, like `which`.
+ * Returns null if not found or not executable. A binary containing a path
+ * separator is checked directly instead of searched on PATH.
+ */
+export function resolveBinaryPath(binary: string, pathEnv: string = process.env.PATH ?? ''): string | null {
+  if (!binary) return null
+  if (binary.includes('/')) {
+    return isExecutableFile(binary) ? binary : null
+  }
+  for (const dir of pathEnv.split(delimiter)) {
+    if (!dir) continue
+    const candidate = join(dir, binary)
+    if (isExecutableFile(candidate)) return candidate
+  }
+  return null
+}
 
 // Legacy export kept for test compatibility — delegates to providers.ts
 export interface SpawnArgs {
@@ -12,9 +42,11 @@ export interface SpawnArgs {
   model: string
   providerId?: ProviderId
   allowedTools?: string
+  disallowedTools?: string
   permissionProfile?: string
   resumeId?: string
   forkSession?: boolean
+  maxBudgetUsd?: number
 }
 
 export function buildSpawnArgs(args: SpawnArgs): string[] {
@@ -23,9 +55,11 @@ export function buildSpawnArgs(args: SpawnArgs): string[] {
     model: args.model,
     providerId: args.providerId ?? 'claude',
     allowedTools: args.allowedTools,
+    disallowedTools: args.disallowedTools,
     permissionProfile: args.permissionProfile,
     resumeId: args.resumeId,
     forkSession: args.forkSession,
+    maxBudgetUsd: args.maxBudgetUsd,
   })
   return cmd.args
 }
@@ -46,11 +80,13 @@ export interface SpawnOptions {
   profile: string
   timeLimit: number
   allowedTools?: string
+  disallowedTools?: string
   cwd?: string
   gitBranch: boolean
   resumeId?: string
   forkSession?: boolean
   resumeCount?: number
+  maxBudgetUsd?: number
 }
 
 export interface SpawnedAgent {
@@ -69,10 +105,20 @@ export function spawnAgent(opts: SpawnOptions): SpawnedAgent {
     model: opts.model,
     providerId: opts.providerId,
     allowedTools: opts.allowedTools,
+    disallowedTools: opts.disallowedTools,
     permissionProfile: opts.profile,
     resumeId: opts.resumeId,
     forkSession: opts.forkSession,
+    maxBudgetUsd: opts.maxBudgetUsd,
   })
+
+  // Preflight: fail fast with a clear, actionable error if the provider CLI
+  // is missing — otherwise node-pty produces an opaque "errored" session.
+  if (!resolveBinaryPath(cmd.binary)) {
+    throw new Error(
+      `Cannot spawn agent: '${cmd.binary}' not found on PATH. Is the ${opts.providerId} CLI installed and on the runner's PATH?`,
+    )
+  }
 
   const cwd = opts.cwd ?? config.vaultPath
   const ptyProcess = pty.spawn(cmd.binary, cmd.args, {

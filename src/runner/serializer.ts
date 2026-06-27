@@ -1,11 +1,11 @@
 // src/runner/serializer.ts
-// Serializes in-memory Task[] back to todo-mediaserver.md format.
+// Serializes in-memory Task[] back to todo-<project>.md format.
 // Inverse of parser.ts — must produce output that round-trips through parseTodoFile().
 import type { Task, TaskStatus, Priority, TodoFrontmatter } from '../shared/types.js'
 import { deriveTaskBucket, parseTimeMinutes } from './parser.js'
 
 // --- Status serialization (reverse of parser.ts:parseStatus) ---
-const STATUS_LABELS: Record<TaskStatus, string> = {
+export const STATUS_LABELS: Record<TaskStatus, string> = {
   'needs-planning': '📝 Needs Planning',
   'plan-review': '👁️ Plan Review',
   'ready': '✅ Ready',
@@ -17,7 +17,7 @@ const STATUS_LABELS: Record<TaskStatus, string> = {
 }
 
 // --- Priority serialization ---
-const PRIORITY_EMOJIS: Record<Priority, string> = {
+export const PRIORITY_EMOJIS: Record<Priority, string> = {
   HIGH: '🔴',
   MEDIUM: '🟡',
   LOW: '🟢',
@@ -136,7 +136,11 @@ export function serializeTask(task: Task): string {
   // Metadata line
   const priorityEmoji = PRIORITY_EMOJIS[task.priority] || '🟡'
   const statusLabel = STATUS_LABELS[task.status] || '✅ Ready'
-  lines.push(`**Priority:** ${priorityEmoji} ${task.priority} | **Time:** ${task.timeEstimate} | **Status:** ${statusLabel}`)
+  let metaLine = `**Priority:** ${priorityEmoji} ${task.priority} | **Time:** ${task.timeEstimate} | **Status:** ${statusLabel}`
+  if (task.score != null) {
+    metaLine += ` | **Score:** ${task.score}`
+  }
+  lines.push(metaLine)
 
   // Optional plan link
   if (task.planLink) {

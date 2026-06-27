@@ -2,13 +2,13 @@ import { describe, it, expect } from 'vitest'
 import { parseTodoFile, parseTimeMinutes, deriveTaskBucket, parseStatus } from '../parser.js'
 
 const SAMPLE_TODO = `---
-project: mediaserver
+project: example
 description: Ubuntu media server - 47 Docker services
-default-cwd: /home/user/projects/my-vault
-claude-md: /home/user/projects/my-vault/CLAUDE.md
+default-cwd: /path/to/vault
+claude-md: /path/to/vault/CLAUDE.md
 ---
 
-# Todo - Media Server
+# Todo - Example Project
 
 ## Infrastructure
 
@@ -28,7 +28,7 @@ Create bootable system backup with weekly automation.
 
 ### 3. 📊 PDF Quarantine Notification
 **Priority:** 🟢 LOW | **Time:** 15 min | **Status:** ✅ Ready
-**Affects:** notifiarr, readarr
+**Affects:** auth, database
 **Depends:** 1
 
 GDrive upload + EPUB sync already running in production.
@@ -42,9 +42,9 @@ Waiting on disk upgrade to implement log rotation.
 describe('parseTodoFile', () => {
   it('extracts frontmatter metadata', () => {
     const result = parseTodoFile(SAMPLE_TODO)
-    expect(result.frontmatter.project).toBe('mediaserver')
+    expect(result.frontmatter.project).toBe('example')
     expect(result.frontmatter.description).toContain('47 Docker')
-    expect(result.frontmatter['default-cwd']).toBe('/home/user/projects/my-vault')
+    expect(result.frontmatter['default-cwd']).toBe('/path/to/vault')
   })
 
   it('parses tasks with sequential numeric IDs', () => {
@@ -77,7 +77,7 @@ describe('parseTodoFile', () => {
   it('extracts affects tags', () => {
     const { tasks } = parseTodoFile(SAMPLE_TODO)
     expect(tasks[1].affects).toEqual(['docker'])
-    expect(tasks[2].affects).toEqual(['notifiarr', 'readarr'])
+    expect(tasks[2].affects).toEqual(['auth', 'database'])
     expect(tasks[0].affects).toEqual([])
   })
 
@@ -97,7 +97,7 @@ describe('parseTodoFile', () => {
 
   it('sets projectId from frontmatter', () => {
     const { tasks } = parseTodoFile(SAMPLE_TODO)
-    expect(tasks[0].projectId).toBe('mediaserver')
+    expect(tasks[0].projectId).toBe('example')
   })
 })
 
@@ -164,5 +164,11 @@ describe('parseStatus', () => {
     expect(parseStatus('✅ Unblocked (prerequisites complete)')).toBe('ready')
     expect(parseStatus('📝 Awaiting 1TB drive')).toBe('needs-planning')
     expect(parseStatus('🔧 Core working — notification remaining')).toBe('ready')
+  })
+
+  it('reads the weekly-synthesis "✅ DONE (date)" convention as done (case-insensitive)', () => {
+    expect(parseStatus('✅ DONE (May 30)')).toBe('done')
+    expect(parseStatus('✅ DONE')).toBe('done')
+    expect(parseStatus('✅ done')).toBe('done')
   })
 })

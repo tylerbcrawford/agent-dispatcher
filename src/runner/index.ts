@@ -2,7 +2,7 @@
 // Host-side agent orchestrator — listens on Unix socket for WebSocket connections
 import { WebSocketServer, WebSocket } from 'ws'
 import { createServer } from 'http'
-import { readFileSync, existsSync, unlinkSync } from 'fs'
+import { readFileSync, existsSync, unlinkSync, rmSync } from 'fs'
 import type { Task, AgentSession, ClientMessage, ServerMessage, QueueItem, TodoFrontmatter, PromptLibraryMeta, PromptTemplateContent } from '../shared/types.js'
 import { config, loadProjectRegistry } from './config.js'
 import { parseTodoFile } from './parser.js'
@@ -10,7 +10,7 @@ import { loadPromptLibrary } from './prompt-library.js'
 import { saveSession, loadAllSessions, deleteSession, pruneOldSessions } from './sessions.js'
 import { checkStall } from './stall-detector.js'
 import { initNotifier, notifyStalled, notifyTimeout } from './notifier.js'
-import { loadProfiles, toAllowedTools } from './permissions.js'
+import { loadProfiles, toAllowedTools, toDisallowedTools } from './permissions.js'
 import type { RalphContext } from './ralph.js'
 import type { IPty } from 'node-pty'
 import type { HandlerContext } from './handler-context.js'
@@ -18,10 +18,13 @@ import type { HandlerContext } from './handler-context.js'
 // Handler imports
 import { handleSpawn, handleInput, handleNudge, handleStop, handleResume, handleClearCompletedAgents, addQueueItem } from './handlers/agent-handlers.js'
 import { handleCreateTask, handleUpdateTask, handleDeleteTask, handleDeleteTasks } from './handlers/task-handlers.js'
-import { handleCreateProject, handleUpdateProject, handleDeleteProject } from './handlers/project-handlers.js'
+import { handleCreateProject, handleUpdateProject, handleDeleteProject, handleUpdateGroups } from './handlers/project-handlers.js'
 import { handleSwitchProject, handleRequestTasks, handleRequestConversation, handleRequestDiff, handleRequestPlanContent } from './handlers/data-handlers.js'
 import { handleRequestPromptTemplates, handleSavePromptTemplate, handleResetPromptTemplate } from './handlers/prompt-handlers.js'
 import { handleResolveQueueItem } from './handlers/queue-handlers.js'
+import { handleRescoreAll, handleRescoreProject, handleUpdateProjectWeight, handleUpdateProjectWeightsBatch } from './handlers/score-handlers.js'
+import { startWatcher, stopWatcher } from './watcher.js'
+import { planExists } from './plan-resolver.js'
 
 // --- State ---
 const agents = new Map<string, { session: AgentSession; pty: IPty | null }>()
@@ -43,13 +46,23 @@ function resolveAllowedTools(profileName: string): string | undefined {
   return toAllowedTools(profile).join(',')
 }
 
+function resolveDisallowedTools(profileName: string): string | undefined {
+  const profile = permissionProfiles.get(profileName)
+  if (!profile) return undefined
+  const disallowed = toDisallowedTools(profile)
+  return disallowed.length > 0 ? disallowed.join(',') : undefined
+}
+
 function loadTasks() {
   tasks = []
   for (const project of registry.projects.filter(p => p.active)) {
     if (existsSync(project.todoFile)) {
       const content = readFileSync(project.todoFile, 'utf-8')
       const parsed = parseTodoFile(content)
-      for (const task of parsed.tasks) task.projectId = project.id
+      const planFolder = project.todoFile.replace(/\/[^/]+$/, '')
+      for (const t of parsed.tasks) {
+        t.hasPlan = planExists(t.planLink, config.vaultPath, planFolder)
+      }
       tasks.push(...parsed.tasks)
       projectFrontmatters.set(project.id, parsed.frontmatter)
     }
@@ -142,7 +155,7 @@ const ctx: HandlerContext = {
   agents, queue, tasks, registry, promptLibrary,
   projectFrontmatters, ralphContexts, lastSignals, clients,
   permissionProfiles,
-  broadcast, loadTasks, reloadPromptLibrary, resolveAllowedTools,
+  broadcast, loadTasks, reloadPromptLibrary, resolveAllowedTools, resolveDisallowedTools,
   saveSession, deleteSession, buildPromptLibraryMeta, buildPromptTemplates,
   unicast: null!,  // set per-message in handleClientMessage
 }
@@ -156,9 +169,52 @@ const origReloadPromptLibrary = reloadPromptLibrary
 const syncedReloadPromptLibrary = () => { origReloadPromptLibrary(); ctx.promptLibrary = promptLibrary }
 ctx.reloadPromptLibrary = syncedReloadPromptLibrary
 
+// --- File watcher for todo auto-detection + reload ---
+let reloadTimer: ReturnType<typeof setTimeout> | null = null
+
+startWatcher({
+  vaultPath: config.vaultPath,
+  registry,
+  onTasksChanged: (filePath) => {
+    // Debounce: collapse rapid saves into one reload
+    if (reloadTimer) clearTimeout(reloadTimer)
+    reloadTimer = setTimeout(() => {
+      console.log(`Reloading tasks (file changed: ${filePath})`)
+      syncedLoadTasks()
+      for (const project of registry.projects.filter(p => p.active)) {
+        broadcast({
+          type: 'tasks',
+          projectId: project.id,
+          tasks: tasks.filter(t => t.projectId === project.id),
+        })
+      }
+    }, 1000)
+  },
+  onProjectAdded: (updatedRegistry) => {
+    registry = updatedRegistry
+    ctx.registry = registry
+    syncedLoadTasks()
+    broadcast({ type: 'projects', projects: registry.projects })
+    for (const project of registry.projects.filter(p => p.active)) {
+      broadcast({
+        type: 'tasks',
+        projectId: project.id,
+        tasks: tasks.filter(t => t.projectId === project.id),
+      })
+    }
+  },
+})
+
 // --- WebSocket Server on Unix socket ---
 const socketPath = config.unixSocket
-if (existsSync(socketPath)) unlinkSync(socketPath)
+if (existsSync(socketPath)) {
+  try {
+    unlinkSync(socketPath)
+  } catch {
+    // Socket path might be a directory (Docker phantom mount) — force-remove it
+    rmSync(socketPath, { recursive: true, force: true })
+  }
+}
 
 const server = createServer()
 const wss = new WebSocketServer({ server })
@@ -169,6 +225,7 @@ wss.on('connection', (ws) => {
 
   const defaultProject = registry.defaultProject
   ws.send(JSON.stringify({ type: 'projects', projects: registry.projects } satisfies ServerMessage))
+  ws.send(JSON.stringify({ type: 'project_groups', groups: registry.groups ?? [] } satisfies ServerMessage))
   ws.send(JSON.stringify({ type: 'prompt_library', library: buildPromptLibraryMeta() } satisfies ServerMessage))
   ws.send(JSON.stringify({ type: 'tasks', projectId: defaultProject, tasks: tasks.filter(t => t.projectId === defaultProject) } satisfies ServerMessage))
   ws.send(JSON.stringify({ type: 'agents', agents: Array.from(agents.values()).map(a => a.session) } satisfies ServerMessage))
@@ -270,6 +327,9 @@ function handleClientMessage(msg: ClientMessage, ws: import('ws').WebSocket) {
     case 'delete_project':
       handleDeleteProject(ctx, msg)
       break
+    case 'update_groups':
+      handleUpdateGroups(ctx, msg)
+      break
     case 'clear_completed_agents':
       handleClearCompletedAgents(ctx)
       break
@@ -281,6 +341,18 @@ function handleClientMessage(msg: ClientMessage, ws: import('ws').WebSocket) {
       break
     case 'reset_prompt_template':
       handleResetPromptTemplate(ctx, msg)
+      break
+    case 'update_project_weight':
+      handleUpdateProjectWeight(ctx, msg)
+      break
+    case 'update_project_weights_batch':
+      handleUpdateProjectWeightsBatch(ctx, msg)
+      break
+    case 'rescore_all':
+      handleRescoreAll(ctx)
+      break
+    case 'rescore_project':
+      handleRescoreProject(ctx, msg)
       break
   }
 }
@@ -330,7 +402,8 @@ process.on('SIGINT', () => {
       saveSession(agent.session)
     }
   }
+  stopWatcher()
   server.close()
-  if (existsSync(socketPath)) unlinkSync(socketPath)
+  try { if (existsSync(socketPath)) unlinkSync(socketPath) } catch { /* ignore */ }
   process.exit(0)
 })

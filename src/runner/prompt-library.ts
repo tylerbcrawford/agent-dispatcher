@@ -139,8 +139,13 @@ export function loadPromptLibrary(promptsDir: string): PromptLibrary {
   return { bases, variants, snippets, taskSpecific, modelHints }
 }
 
-/** Save a custom prompt override for a mode */
-export function saveCustomPrompt(promptsDir: string, mode: RunMode, content: string): void {
+/** Save a custom prompt override for a mode. Optionally override model/time/profile metadata. */
+export function saveCustomPrompt(
+  promptsDir: string,
+  mode: RunMode,
+  content: string,
+  meta?: { model?: string; time?: number; profile?: string }
+): void {
   const customDir = join(promptsDir, 'custom')
   mkdirSync(customDir, { recursive: true })
 
@@ -151,6 +156,11 @@ export function saveCustomPrompt(promptsDir: string, mode: RunMode, content: str
     const { data } = parseFrontmatter(readFileSync(basePath, 'utf-8'))
     frontmatterData = { ...data }
   }
+
+  // Apply per-stage metadata overrides when provided (falls back to base otherwise)
+  if (meta?.model) frontmatterData.default_model = meta.model
+  if (meta?.time != null) frontmatterData.default_time = meta.time
+  if (meta?.profile) frontmatterData.default_profile = meta.profile
 
   const yaml = stringifyYaml(frontmatterData).trim()
   const fileContent = `---\n${yaml}\n---\n\n${content}`

@@ -1,10 +1,13 @@
 import { describe, it, expect } from 'vitest'
-import { buildSpawnArgs, buildDisplayName } from '../spawner.js'
+import { buildSpawnArgs, buildDisplayName, resolveBinaryPath, spawnAgent } from '../spawner.js'
 import type { Task } from '../../shared/types.js'
+import { mkdtempSync, writeFileSync, chmodSync, rmSync } from 'fs'
+import { tmpdir } from 'os'
+import { join } from 'path'
 
 const mockTask: Task = {
   id: 1,
-  projectId: 'mediaserver',
+  projectId: 'example',
   name: 'API Key Rotation',
   emoji: '📦',
   category: 'Infrastructure',
@@ -14,9 +17,10 @@ const mockTask: Task = {
   status: 'ready',
   description: 'Rotate all API keys.',
   planLink: null,
-  affects: ['sonarr'],
+  affects: ['api'],
   depends: [],
   bucket: 'ready',
+  score: null,
 }
 
 describe('buildSpawnArgs (claude)', () => {
@@ -69,6 +73,18 @@ describe('buildSpawnArgs (claude)', () => {
       model: 'sonnet',
     })
     expect(args[args.length - 1]).toBe('You are working on task...')
+  })
+
+  it('includes --max-budget-usd when a budget is set', () => {
+    const args = buildSpawnArgs({ prompt: 'x', model: 'sonnet', maxBudgetUsd: 2 })
+    const i = args.indexOf('--max-budget-usd')
+    expect(i).toBeGreaterThanOrEqual(0)
+    expect(args[i + 1]).toBe('2')
+  })
+
+  it('omits --max-budget-usd when no budget is set', () => {
+    const args = buildSpawnArgs({ prompt: 'x', model: 'sonnet' })
+    expect(args).not.toContain('--max-budget-usd')
   })
 })
 
@@ -181,5 +197,64 @@ describe('buildDisplayName', () => {
   it('increments for resumes', () => {
     const name = buildDisplayName(mockTask, 'plan', 2)
     expect(name).toBe('1-api-key-rotation-plan-03')
+  })
+})
+
+describe('resolveBinaryPath', () => {
+  it('resolves an executable found on the provided PATH', () => {
+    const dir = mkdtempSync(join(tmpdir(), 'ad-bin-'))
+    const bin = join(dir, 'fake-cli')
+    writeFileSync(bin, '#!/bin/sh\necho hi\n')
+    chmodSync(bin, 0o755)
+    try {
+      expect(resolveBinaryPath('fake-cli', dir)).toBe(bin)
+    } finally {
+      rmSync(dir, { recursive: true, force: true })
+    }
+  })
+
+  it('returns null when the binary is absent from PATH', () => {
+    const dir = mkdtempSync(join(tmpdir(), 'ad-bin-'))
+    try {
+      expect(resolveBinaryPath('definitely-missing-xyz', dir)).toBeNull()
+    } finally {
+      rmSync(dir, { recursive: true, force: true })
+    }
+  })
+
+  it('returns null for a present-but-non-executable file', () => {
+    const dir = mkdtempSync(join(tmpdir(), 'ad-bin-'))
+    const f = join(dir, 'not-exec')
+    writeFileSync(f, 'data')
+    chmodSync(f, 0o644)
+    try {
+      expect(resolveBinaryPath('not-exec', dir)).toBeNull()
+    } finally {
+      rmSync(dir, { recursive: true, force: true })
+    }
+  })
+})
+
+describe('spawnAgent binary preflight', () => {
+  const baseOpts = {
+    task: mockTask,
+    prompt: 'test prompt',
+    runMode: 'plan' as const,
+    executionMode: 'single' as const,
+    model: 'sonnet',
+    providerId: 'claude' as const,
+    profile: 'read-only',
+    timeLimit: 20,
+    gitBranch: false,
+  }
+
+  it('throws a clear error (before pty.spawn) when the provider binary is not on PATH', () => {
+    const origPath = process.env.PATH
+    process.env.PATH = ''
+    try {
+      expect(() => spawnAgent({ ...baseOpts })).toThrow(/not found on PATH/)
+    } finally {
+      process.env.PATH = origPath
+    }
   })
 })

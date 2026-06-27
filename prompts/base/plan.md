@@ -15,7 +15,7 @@ ${projectDescription}
 ${description}
 
 ## Your Mission
-Create a detailed implementation plan for this task. Save it to the vault.
+Create a detailed implementation plan for this task. Save it to the project's `plans/` directory.
 
 ## Workflow (REQUIRED)
 1. **Explore context** - Read relevant files, check recent git history, understand current state

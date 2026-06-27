@@ -9,7 +9,7 @@ export function handleRequestPromptTemplates(ctx: HandlerContext) {
 }
 
 export function handleSavePromptTemplate(ctx: HandlerContext, msg: Extract<ClientMessage, { type: 'save_prompt_template' }>) {
-  saveCustomPrompt(config.promptsDir, msg.mode, msg.content)
+  saveCustomPrompt(config.promptsDir, msg.mode, msg.content, { model: msg.model, time: msg.time, profile: msg.profile })
   ctx.reloadPromptLibrary()
   console.log(`Saved custom prompt for mode: ${msg.mode}`)
 }

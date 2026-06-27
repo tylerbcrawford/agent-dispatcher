@@ -5,13 +5,13 @@ import { parseTodoFile } from '../parser'
 import type { Task, TodoFrontmatter } from '../../shared/types'
 
 const SAMPLE_TODO = `---
-project: mediaserver
+project: example
 description: Ubuntu media server - 47 Docker services
-default-cwd: /home/user/projects/my-vault
-claude-md: /home/user/projects/my-vault/CLAUDE.md
+default-cwd: /path/to/vault
+claude-md: /path/to/vault/CLAUDE.md
 ---
 
-# Todo — Media Server
+# Todo — Example Project
 
 **Last Updated:** February 19, 2026 (migrated to standardized v3 format)
 **Purpose:** Concise running to-do list for all media server projects
@@ -47,8 +47,8 @@ Rotate all API keys and tokens.
 
 ### 5. ⚡ Indexer Statistics
 **Priority:** 🔴 HIGH | **Time:** 1-2 hrs | **Status:** ✅ Ready
-**Plan:** [[04_Archive/prowlarr-indexer-stats]]
-**Affects:** prowlarr
+**Plan:** [[archive/sample-doc]]
+**Affects:** nginx
 
 Phase 2: Automate stats script.
 
@@ -56,7 +56,7 @@ Phase 2: Automate stats script.
 
 ### 6. 📊 Tdarr Workflow
 **Priority:** 🟡 MEDIUM | **Time:** 30-60 min | **Status:** 📝 Needs Planning
-**Affects:** tdarr, plex
+**Affects:** cache, database
 
 Automated 4K to 1080p workflow.
 
@@ -80,10 +80,10 @@ Automated 4K to 1080p workflow.
 `
 
 const SAMPLE_FRONTMATTER: TodoFrontmatter = {
-  project: 'mediaserver',
+  project: 'example',
   description: 'Ubuntu media server - 47 Docker services',
-  'default-cwd': '/home/user/projects/my-vault',
-  'claude-md': '/home/user/projects/my-vault/CLAUDE.md',
+  'default-cwd': '/path/to/vault',
+  'claude-md': '/path/to/vault/CLAUDE.md',
 }
 
 describe('extractCategoryOrder', () => {
@@ -112,7 +112,7 @@ describe('extractTrailingContent', () => {
 describe('serializeTask', () => {
   const baseTask: Task = {
     id: 1,
-    projectId: 'mediaserver',
+    projectId: 'example',
     name: 'Test Task',
     emoji: '⚡',
     category: 'System',
@@ -125,6 +125,7 @@ describe('serializeTask', () => {
     affects: [],
     depends: [],
     bucket: 'needs-planning',
+    score: null,
   }
 
   it('serializes each status correctly', () => {
@@ -161,8 +162,8 @@ describe('serializeTask', () => {
   })
 
   it('includes affects when present', () => {
-    const result = serializeTask({ ...baseTask, affects: ['sonarr', 'radarr'] })
-    expect(result).toContain('**Affects:** sonarr, radarr')
+    const result = serializeTask({ ...baseTask, affects: ['api', 'web'] })
+    expect(result).toContain('**Affects:** api, web')
   })
 
   it('omits affects when empty', () => {
@@ -210,9 +211,9 @@ describe('serializeTodoFile', () => {
     const parsed = parseTodoFile(SAMPLE_TODO)
     const serialized = serializeTodoFile(SAMPLE_TODO, parsed.tasks, parsed.frontmatter)
 
-    expect(serialized).toContain('---\nproject: mediaserver')
+    expect(serialized).toContain('---\nproject: example')
     expect(serialized).toContain('description: Ubuntu media server - 47 Docker services')
-    expect(serialized).toContain('default-cwd: /home/user/projects/my-vault')
+    expect(serialized).toContain('default-cwd: /path/to/vault')
   })
 
   it('preserves trailing content (Recently Completed, Project Stats)', () => {
@@ -230,7 +231,7 @@ describe('serializeTodoFile', () => {
     const parsed = parseTodoFile(SAMPLE_TODO)
     const newTask: Task = {
       id: 10,
-      projectId: 'mediaserver',
+      projectId: 'example',
       name: 'New Test Task',
       emoji: '🆕',
       category: 'System',
@@ -243,6 +244,7 @@ describe('serializeTodoFile', () => {
       affects: [],
       depends: [],
       bucket: 'ready',
+      score: null,
     }
 
     const allTasks = [...parsed.tasks, newTask]
@@ -286,7 +288,7 @@ describe('serializeTodoFile', () => {
     const parsed = parseTodoFile(SAMPLE_TODO)
     const newTask: Task = {
       id: 20,
-      projectId: 'mediaserver',
+      projectId: 'example',
       name: 'Brand New Category Task',
       emoji: '🆕',
       category: 'New Category',
@@ -299,6 +301,7 @@ describe('serializeTodoFile', () => {
       affects: [],
       depends: [],
       bucket: 'ready',
+      score: null,
     }
 
     const allTasks = [...parsed.tasks, newTask]
@@ -327,7 +330,7 @@ describe('serializeTodoFile', () => {
     const parsed = parseTodoFile(SAMPLE_TODO)
     const taskWithAll: Task = {
       id: 30,
-      projectId: 'mediaserver',
+      projectId: 'example',
       name: 'Full Featured Task',
       emoji: '🎯',
       category: 'System',
@@ -337,9 +340,10 @@ describe('serializeTodoFile', () => {
       status: 'ready',
       description: 'A fully featured task with all fields.',
       planLink: 'some/plan-file',
-      affects: ['sonarr', 'radarr'],
+      affects: ['api', 'web'],
       depends: [1, 2],
       bucket: 'ready',
+      score: null,
     }
 
     const allTasks = [...parsed.tasks, taskWithAll]
@@ -349,7 +353,7 @@ describe('serializeTodoFile', () => {
     const found = reparsed.tasks.find(t => t.id === 30)
     expect(found).toBeDefined()
     expect(found!.planLink).toBe('some/plan-file')
-    expect(found!.affects).toEqual(['sonarr', 'radarr'])
+    expect(found!.affects).toEqual(['api', 'web'])
     expect(found!.depends).toEqual([1, 2])
     expect(found!.status).toBe('ready')
   })
@@ -358,7 +362,7 @@ describe('serializeTodoFile', () => {
     const parsed = parseTodoFile(SAMPLE_TODO)
     const minimalTask: Task = {
       id: 31,
-      projectId: 'mediaserver',
+      projectId: 'example',
       name: 'Minimal Task',
       emoji: '📌',
       category: 'System',
@@ -371,6 +375,7 @@ describe('serializeTodoFile', () => {
       affects: [],
       depends: [],
       bucket: 'ready',
+      score: null,
     }
 
     const allTasks = [...parsed.tasks, minimalTask]

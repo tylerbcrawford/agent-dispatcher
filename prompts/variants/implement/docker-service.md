@@ -6,7 +6,7 @@ description: Docker-specific implementation with health checks and compose best 
 default_profile: standard
 default_time: 60
 default_model: haiku
-tags: [docker, mediaserver, compose]
+tags: [docker, selfhosted, compose]
 extends: implement
 ---
 

@@ -1,7 +1,7 @@
 // src/runner/handlers/agent-handlers.ts
 import type { AgentSession, ClientMessage, QueueItem } from '../../shared/types.js'
 import { spawnAgent, type SpawnedAgent } from '../spawner.js'
-import { detectSignal, detectQuestion, parseStreamJsonSessionId, extractStreamJsonText, parseVerificationReport } from '../detector.js'
+import { detectSignal, detectQuestion, parseStreamJsonSessionId, extractStreamJsonText, parseVerificationReport, updateDenialCount } from '../detector.js'
 import { resolvePlanLink } from '../plan-resolver.js'
 import { buildPlanDetail } from '../plan-detail.js'
 import { composePrompt, getPromptsForMode, taskToSlug, type PromptVars } from '../prompt-library.js'
@@ -10,6 +10,9 @@ import { notifyNeedsInput, notifyError, notifyStalled, notifyTimeout, notifyComp
 import { shouldContinueLoop, buildContinuationPrompt } from '../ralph.js'
 import { setTaskStatus } from './task-handlers.js'
 import type { HandlerContext } from '../handler-context.js'
+
+// Token-burn watchdog: abort after this many consecutive profile-denials.
+const DENIAL_ABORT_THRESHOLD = 3
 
 /** Strip ANSI escape codes from terminal output */
 function stripAnsi(str: string): string {
@@ -83,19 +86,29 @@ export function handleSpawn(ctx: HandlerContext, msg: Extract<ClientMessage, { t
     prompt += '\n\n## Additional Instructions\n\n' + msg.customPrompt.trim()
   }
 
-  const spawned = spawnAgent({
-    task,
-    prompt,
-    runMode: msg.runMode,
-    executionMode: msg.executionMode,
-    model: msg.model,
-    providerId: msg.providerId ?? 'claude',
-    profile: msg.profile,
-    timeLimit: msg.timeLimit,
-    gitBranch: msg.gitBranch,
-    allowedTools: ctx.resolveAllowedTools(msg.profile),
-    cwd: frontmatter?.['default-cwd'],
-  })
+  let spawned: SpawnedAgent
+  try {
+    spawned = spawnAgent({
+      task,
+      prompt,
+      runMode: msg.runMode,
+      executionMode: msg.executionMode,
+      model: msg.model,
+      providerId: msg.providerId ?? 'claude',
+      profile: msg.profile,
+      timeLimit: msg.timeLimit,
+      gitBranch: msg.gitBranch,
+      allowedTools: ctx.resolveAllowedTools(msg.profile),
+      disallowedTools: ctx.resolveDisallowedTools(msg.profile),
+      cwd: frontmatter?.['default-cwd'],
+      maxBudgetUsd: config.maxBudgetUsd,
+    })
+  } catch (err) {
+    const message = err instanceof Error ? err.message : `Failed to spawn agent: ${String(err)}`
+    console.error(message)
+    ctx.broadcast({ type: 'task_write_error', projectId: msg.projectId, message })
+    return
+  }
 
   spawned.session.originalTaskContext = {
     taskName: task.name,
@@ -119,9 +132,30 @@ export function handleSpawn(ctx: HandlerContext, msg: Extract<ClientMessage, { t
 }
 
 export function wireAgentOutput(ctx: HandlerContext, spawned: SpawnedAgent) {
+  // Per-agent consecutive profile-denial counter (token-burn watchdog).
+  // Local to this closure so each (re)spawn starts fresh and nothing persists to the session.
+  let consecutiveDenials = 0
+
   spawned.pty.onData((data: string) => {
     spawned.session.lastOutputAt = Date.now()
     spawned.session.lastOutput = (spawned.session.lastOutput + data).slice(-15_000)
+
+    // Watchdog: a contradictory profile/mode (e.g. read-only + plan) makes the
+    // agent flail on denied tools toward the time limit. Abort fast instead.
+    consecutiveDenials = updateDenialCount(consecutiveDenials, data)
+    if (consecutiveDenials >= DENIAL_ABORT_THRESHOLD && spawned.session.state === 'running') {
+      const message = `Agent aborted: blocked by the '${spawned.session.permissionProfile}' profile after ${consecutiveDenials} consecutive tool denials. Pick a profile/mode that grants the tools the task needs.`
+      console.error(`[watchdog] ${spawned.session.displayName}: ${message}`)
+      spawned.session.state = 'errored'
+      ctx.lastSignals.set(spawned.session.id, 'partial') // mark handled so onExit doesn't re-notify completed
+      ctx.saveSession(spawned.session)
+      ctx.broadcast({ type: 'terminal_output', agentId: spawned.session.id, data })
+      ctx.broadcast({ type: 'agent_state', agentId: spawned.session.id, state: 'errored' })
+      ctx.broadcast({ type: 'task_write_error', projectId: spawned.session.projectId, message })
+      ctx.broadcast({ type: 'agents', agents: Array.from(ctx.agents.values()).map(a => a.session) })
+      spawned.pty.kill()
+      return
+    }
 
     const sessionId = parseStreamJsonSessionId(data)
     if (sessionId) spawned.session.providerSessionId = sessionId
@@ -299,21 +333,31 @@ export function wireAgentOutput(ctx: HandlerContext, spawned: SpawnedAgent) {
             : null
           const continuationPrompt = buildContinuationPrompt(spawned.session, spawned.session.lastOutput, ralphHint)
           const ralphFrontmatter = ctx.projectFrontmatters.get(spawned.session.projectId)
-          const nextSpawned = spawnAgent({
-            task,
-            prompt: continuationPrompt,
-            runMode: spawned.session.runMode,
-            executionMode: spawned.session.executionMode,
-            model: spawned.session.model,
-            providerId: spawned.session.providerId,
-            profile: spawned.session.permissionProfile,
-            timeLimit: spawned.session.timeLimit,
-            gitBranch: !!spawned.session.gitBranch,
-            resumeId: spawned.session.providerSessionId,
-            resumeCount: spawned.session.resumeCount + 1,
-            allowedTools: ctx.resolveAllowedTools(spawned.session.permissionProfile),
-            cwd: ralphFrontmatter?.['default-cwd'],
-          })
+          let nextSpawned: SpawnedAgent
+          try {
+            nextSpawned = spawnAgent({
+              task,
+              prompt: continuationPrompt,
+              runMode: spawned.session.runMode,
+              executionMode: spawned.session.executionMode,
+              model: spawned.session.model,
+              providerId: spawned.session.providerId,
+              profile: spawned.session.permissionProfile,
+              timeLimit: spawned.session.timeLimit,
+              gitBranch: !!spawned.session.gitBranch,
+              resumeId: spawned.session.providerSessionId,
+              resumeCount: spawned.session.resumeCount + 1,
+              allowedTools: ctx.resolveAllowedTools(spawned.session.permissionProfile),
+              disallowedTools: ctx.resolveDisallowedTools(spawned.session.permissionProfile),
+              cwd: ralphFrontmatter?.['default-cwd'],
+              maxBudgetUsd: config.maxBudgetUsd,
+            })
+          } catch (err) {
+            const message = `Ralph re-spawn failed: ${err instanceof Error ? err.message : String(err)}`
+            console.error(message)
+            ctx.broadcast({ type: 'task_write_error', projectId: spawned.session.projectId, message })
+            return
+          }
 
           nextSpawned.session.conversationHistory = [...spawned.session.conversationHistory]
           nextSpawned.session.originalTaskContext = spawned.session.originalTaskContext
@@ -407,22 +451,32 @@ export function handleResume(ctx: HandlerContext, msg: Extract<ClientMessage, { 
   const resumePrompt = buildRichResumePrompt(agent.session, msg.additionalContext)
 
   const resumeFrontmatter = ctx.projectFrontmatters.get(agent.session.projectId)
-  const spawned = spawnAgent({
-    task,
-    prompt: resumePrompt,
-    runMode: agent.session.runMode,
-    executionMode: agent.session.executionMode,
-    model: agent.session.model,
-    providerId: agent.session.providerId,
-    profile: agent.session.permissionProfile,
-    timeLimit: msg.timeLimit ?? agent.session.timeLimit,
-    gitBranch: !!agent.session.gitBranch,
-    resumeId: agent.session.providerSessionId,
-    forkSession: msg.fork,
-    resumeCount: agent.session.resumeCount + 1,
-    allowedTools: ctx.resolveAllowedTools(agent.session.permissionProfile),
-    cwd: resumeFrontmatter?.['default-cwd'],
-  })
+  let spawned: SpawnedAgent
+  try {
+    spawned = spawnAgent({
+      task,
+      prompt: resumePrompt,
+      runMode: agent.session.runMode,
+      executionMode: agent.session.executionMode,
+      model: agent.session.model,
+      providerId: agent.session.providerId,
+      profile: agent.session.permissionProfile,
+      timeLimit: msg.timeLimit ?? agent.session.timeLimit,
+      gitBranch: !!agent.session.gitBranch,
+      resumeId: agent.session.providerSessionId,
+      forkSession: msg.fork,
+      resumeCount: agent.session.resumeCount + 1,
+      allowedTools: ctx.resolveAllowedTools(agent.session.permissionProfile),
+      disallowedTools: ctx.resolveDisallowedTools(agent.session.permissionProfile),
+      cwd: resumeFrontmatter?.['default-cwd'],
+      maxBudgetUsd: config.maxBudgetUsd,
+    })
+  } catch (err) {
+    const message = err instanceof Error ? err.message : `Failed to resume agent: ${String(err)}`
+    console.error(message)
+    ctx.broadcast({ type: 'task_write_error', projectId: agent.session.projectId, message })
+    return
+  }
 
   spawned.session.conversationHistory = [...agent.session.conversationHistory]
   spawned.session.originalTaskContext = agent.session.originalTaskContext

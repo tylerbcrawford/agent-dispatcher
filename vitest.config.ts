@@ -6,6 +6,9 @@ export default defineConfig({
     globals: true,
     environment: 'node',
     include: ['src/**/*.test.ts', 'src/**/*.test.tsx'],
+    env: {
+      AC_VAULT_PATH: '/path/to/vault',
+    },
   },
   resolve: {
     alias: {
