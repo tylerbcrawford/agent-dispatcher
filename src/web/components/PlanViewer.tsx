@@ -30,7 +30,7 @@ export default function PlanViewer({ content, onApprove, onReject }: Props) {
       <div className="flex gap-2 mt-2">
         <button
           onClick={() => onApprove(feedback.trim() || undefined)}
-          className="text-xs bg-green-600 hover:bg-green-500 text-white px-3 py-1.5 rounded transition-colors"
+          className="text-xs bg-blue-600 hover:bg-blue-500 text-white px-3 py-1.5 rounded transition-colors"
         >
           Approve
         </button>

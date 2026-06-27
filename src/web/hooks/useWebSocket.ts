@@ -1,12 +1,13 @@
 // src/web/hooks/useWebSocket.ts
 import { useState, useEffect, useRef, useCallback } from 'react'
-import type { Task, AgentSession, QueueItem, ProjectConfig, ServerMessage, ClientMessage, DiffData, PromptLibraryMeta, PromptTemplateContent, ProjectDraft } from '@shared/types'
+import type { Task, AgentSession, QueueItem, ProjectConfig, ProjectGroup, ServerMessage, ClientMessage, DiffData, PromptLibraryMeta, PromptTemplateContent, ProjectDraft } from '@shared/types'
 
 export function useWebSocket() {
   const [tasks, setTasks] = useState<Task[]>([])
   const [agents, setAgents] = useState<AgentSession[]>([])
   const [queue, setQueue] = useState<QueueItem[]>([])
   const [projects, setProjects] = useState<ProjectConfig[]>([])
+  const [groups, setGroups] = useState<ProjectGroup[]>([])
   const [currentProject, setCurrentProject] = useState<string>(() => localStorage.getItem('ac_currentProject') ?? '')
   const [promptLibrary, setPromptLibrary] = useState<PromptLibraryMeta | null>(null)
   const [showAllProjects, setShowAllProjects] = useState(false)
@@ -16,9 +17,20 @@ export function useWebSocket() {
   const [planContents, setPlanContents] = useState<Record<number, string | null>>({})
   const [taskWriteError, setTaskWriteError] = useState<string | null>(null)
   const [promptTemplates, setPromptTemplates] = useState<PromptTemplateContent[]>([])
+  const [scoring, setScoring] = useState(false)
   const wsRef = useRef<WebSocket | null>(null)
   const reconnectDelay = useRef(1000)
   const prevProjectIdsRef = useRef<Set<string>>(new Set())
+  const currentProjectRef = useRef(currentProject)
+  const showAllProjectsRef = useRef(showAllProjects)
+
+  useEffect(() => {
+    currentProjectRef.current = currentProject
+  }, [currentProject])
+
+  useEffect(() => {
+    showAllProjectsRef.current = showAllProjects
+  }, [showAllProjects])
 
   const connect = useCallback(() => {
     const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:'
@@ -31,10 +43,28 @@ export function useWebSocket() {
     }
 
     ws.onmessage = (event) => {
-      const msg: ServerMessage = JSON.parse(event.data)
+      let msg: ServerMessage
+      try {
+        msg = JSON.parse(event.data)
+      } catch (err) {
+        if (import.meta.env.DEV) console.error('Failed to parse server message:', err)
+        return
+      }
       switch (msg.type) {
         case 'tasks':
-          setTasks(msg.tasks)
+          if (msg.projectId === '__all__') {
+            setTasks(msg.tasks)
+            break
+          }
+          setTasks(prev => {
+            if (showAllProjectsRef.current) {
+              return [...prev.filter(task => task.projectId !== msg.projectId), ...msg.tasks]
+            }
+            if (!currentProjectRef.current || currentProjectRef.current === msg.projectId || prev.length === 0) {
+              return msg.tasks
+            }
+            return prev
+          })
           break
         case 'agents':
           setAgents(msg.agents)
@@ -52,6 +82,8 @@ export function useWebSocket() {
               // Auto-switch to newly created project
               setCurrentProject(newProject.id)
               setShowAllProjects(false)
+              currentProjectRef.current = newProject.id
+              showAllProjectsRef.current = false
               localStorage.setItem('ac_currentProject', newProject.id)
               if (wsRef.current?.readyState === WebSocket.OPEN) {
                 wsRef.current.send(JSON.stringify({ type: 'switch_project', projectId: newProject.id }))
@@ -62,6 +94,7 @@ export function useWebSocket() {
               const validStored = stored && msg.projects.some(p => p.id === stored)
               const resolved = validStored ? stored : msg.projects[0].id
               setCurrentProject(resolved)
+              currentProjectRef.current = resolved
               localStorage.setItem('ac_currentProject', resolved)
               // Always request tasks to sync sidebar selection with task panel
               if (wsRef.current?.readyState === WebSocket.OPEN) {
@@ -110,6 +143,12 @@ export function useWebSocket() {
         case 'prompt_templates':
           setPromptTemplates(msg.templates)
           break
+        case 'project_groups':
+          setGroups(msg.groups)
+          break
+        case 'scoring_status':
+          setScoring(msg.status === 'scoring')
+          break
       }
     }
 
@@ -147,6 +186,8 @@ export function useWebSocket() {
   const switchProject = useCallback((projectId: string) => {
     setCurrentProject(projectId)
     setShowAllProjects(false)
+    currentProjectRef.current = projectId
+    showAllProjectsRef.current = false
     localStorage.setItem('ac_currentProject', projectId)
     send({ type: 'switch_project', projectId })
   }, [send])
@@ -154,6 +195,7 @@ export function useWebSocket() {
   const toggleShowAll = useCallback(() => {
     setShowAllProjects(prev => {
       const next = !prev
+      showAllProjectsRef.current = next
       if (next) {
         send({ type: 'request_tasks', projectId: '__all__' })
       } else {
@@ -171,5 +213,13 @@ export function useWebSocket() {
     send({ type: 'request_prompt_templates' })
   }, [send])
 
-  return { tasks, agents, queue, projects, currentProject, promptLibrary, showAllProjects, switchProject, toggleShowAll, createProject, send, connected, terminalOutput, diffs, requestDiff, planContents, requestPlanContent, taskWriteError, promptTemplates, requestPromptTemplates }
+  const updateGroups = useCallback((newGroups: ProjectGroup[]) => {
+    send({ type: 'update_groups', groups: newGroups })
+  }, [send])
+
+  const rescoreAll = useCallback(() => {
+    send({ type: 'rescore_all' })
+  }, [send])
+
+  return { tasks, agents, queue, projects, groups, currentProject, promptLibrary, showAllProjects, switchProject, toggleShowAll, createProject, updateGroups, send, connected, terminalOutput, diffs, requestDiff, planContents, requestPlanContent, taskWriteError, promptTemplates, requestPromptTemplates, scoring, rescoreAll }
 }

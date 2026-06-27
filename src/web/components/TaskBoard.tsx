@@ -1,48 +1,43 @@
 // src/web/components/TaskBoard.tsx
 import { useState, useEffect } from 'react'
-import type { Task, Priority, Bucket, AgentSession, ClientMessage, PromptLibraryMeta, ProjectConfig, RunMode } from '@shared/types'
-import type { ModeDefaults } from '../hooks/usePreferences'
+import type { Task, Priority, Bucket, AgentSession, ClientMessage, PromptLibraryMeta, ProjectConfig, QueueItem, DiffData } from '@shared/types'
 import TaskCard from './TaskCard'
+import StatusIndicator from './StatusIndicator'
 import SpawnDialog from './SpawnDialog'
 import TaskEditDialog from './TaskEditDialog'
 import TaskFilterBar, { type TaskFilters, DEFAULT_FILTERS, applyFilters } from './TaskFilterBar'
 import FullscreenPlanReview from './FullscreenPlanReview'
+import NeedsYouStrip from './NeedsYouStrip'
 
 const PRIORITY_ORDER: Record<Priority, number> = { HIGH: 0, MEDIUM: 1, LOW: 2 }
-const sortByPriority = (tasks: Task[]) =>
-  [...tasks].sort((a, b) => (PRIORITY_ORDER[a.priority] ?? 1) - (PRIORITY_ORDER[b.priority] ?? 1))
 
-const BUCKET_ORDER: { key: Bucket; label: string; accent: string; collapsible?: boolean }[] = [
-  { key: 'running',        label: 'Running',        accent: 'blue' },
-  { key: 'review',         label: 'Needs Review',   accent: 'purple' },
-  { key: 'ready',          label: 'Ready',          accent: 'green' },
-  { key: 'needs-planning', label: 'Needs Planning', accent: 'yellow' },
-  { key: 'blocked',        label: 'Blocked',        accent: 'red' },
-  { key: 'manual',         label: 'Manual',         accent: 'red' },
-  { key: 'done',           label: 'Done',           accent: 'gray', collapsible: true },
+// Sort by score descending (nulls last), then by priority as tiebreaker
+const sortByScore = (tasks: Task[]) =>
+  [...tasks].sort((a, b) => {
+    const sa = a.score ?? -1
+    const sb = b.score ?? -1
+    if (sa !== sb) return sb - sa
+    return (PRIORITY_ORDER[a.priority] ?? 1) - (PRIORITY_ORDER[b.priority] ?? 1)
+  })
+
+const sortByPriority = (tasks: Task[]) =>
+  [...tasks].sort((a, b) => {
+    // If both have scores, use score descending
+    if (a.score != null && b.score != null && a.score !== b.score) return b.score - a.score
+    return (PRIORITY_ORDER[a.priority] ?? 1) - (PRIORITY_ORDER[b.priority] ?? 1)
+  })
+
+const BUCKET_ORDER: { key: Bucket; label: string; collapsible?: boolean }[] = [
+  { key: 'running',        label: 'Running' },
+  { key: 'review',         label: 'Needs Review' },
+  { key: 'ready',          label: 'Ready' },
+  { key: 'needs-planning', label: 'Needs Planning' },
+  { key: 'blocked',        label: 'Blocked' },
+  { key: 'manual',         label: 'Manual' },
+  { key: 'done',           label: 'Done', collapsible: true },
 ]
 
-// Static class maps — Tailwind JIT can't detect dynamic `border-${accent}-500` templates
-const BORDER_COLORS: Record<string, { normal: string; focused: string }> = {
-  blue:   { normal: 'border-blue-500/30',   focused: 'border-blue-500/60' },
-  purple: { normal: 'border-purple-500/30', focused: 'border-purple-500/60' },
-  green:  { normal: 'border-green-500/30',  focused: 'border-green-500/60' },
-  yellow: { normal: 'border-yellow-500/30', focused: 'border-yellow-500/60' },
-  red:    { normal: 'border-red-500/30',    focused: 'border-red-500/60' },
-  orange: { normal: 'border-orange-500/30', focused: 'border-orange-500/60' },
-  gray:   { normal: 'border-gray-500/30',   focused: 'border-gray-500/60' },
-}
-
-// Left accent border colors per bucket — Tailwind JIT safe
-const LEFT_BORDER_COLORS: Record<string, string> = {
-  blue:   'border-l-blue-500',
-  purple: 'border-l-purple-500',
-  green:  'border-l-green-500',
-  yellow: 'border-l-yellow-500',
-  red:    'border-l-red-500',
-  orange: 'border-l-orange-500',
-  gray:   'border-l-gray-600',
-}
+export type ViewMode = 'bucketed' | 'ranked'
 
 interface Props {
   tasks: Task[]
@@ -54,20 +49,21 @@ interface Props {
   showAllProjects: boolean
   showCreate: boolean
   onCloseCreate: () => void
+  queue: QueueItem[]
   selectionMode: boolean
   onExitSelectionMode: () => void
-  onNavigateQueue?: () => void
-  onNavigateAgents?: () => void
-  onViewTerminal?: (agentId: string) => void
   searchText?: string
   filtersExpanded?: boolean
   onToggleFilters?: () => void
   planContents?: Record<string, string | null>
   requestPlanContent?: (taskId: number, projectId: string) => void
-  preferences: Record<Exclude<RunMode, 'custom'>, ModeDefaults>
+  viewMode?: ViewMode
+  onViewTerminal: (agentId: string) => void
+  diffs: Record<string, DiffData>
+  requestDiff: (agentId: string) => void
 }
 
-export default function TaskBoard({ tasks, agents, send, currentProject, promptLibrary, projects, showAllProjects, showCreate, onCloseCreate, selectionMode, onExitSelectionMode, onNavigateQueue, onNavigateAgents, onViewTerminal, searchText = '', filtersExpanded, onToggleFilters, planContents = {}, requestPlanContent, preferences }: Props) {
+export default function TaskBoard({ tasks, agents, queue, send, currentProject, promptLibrary, projects, showAllProjects, showCreate, onCloseCreate, selectionMode, onExitSelectionMode, searchText = '', filtersExpanded, onToggleFilters, planContents = {}, requestPlanContent, viewMode = 'bucketed', onViewTerminal, diffs, requestDiff }: Props) {
   const [spawnTask, setSpawnTask] = useState<Task | null>(null)
   const [defaultMode, setDefaultMode] = useState<'plan' | 'implement'>('implement')
   const [editTask, setEditTask] = useState<Task | null>(null)
@@ -98,34 +94,45 @@ export default function TaskBoard({ tasks, agents, send, currentProject, promptL
       ? applyFilters(tasks, { ...DEFAULT_FILTERS, searchText })
       : tasks
 
-  // Build agentByTask first so bucket grouping can use it
-  const agentByTask = new Map<number, AgentSession>()
+  // Build agentByTask — index ALL states; prefer active (running/waiting/stalled) over finished;
+  // break ties by most recent startedAt so the latest run wins.
+  // KEY: composite "${projectId}-${taskId}" to avoid collisions in All-Projects view.
+  const ACTIVE_AGENT_STATES = ['running', 'waiting', 'stalled']
+  const agentByTask = new Map<string, AgentSession>()
   for (const agent of agents) {
-    if (agent.state === 'running' || agent.state === 'waiting') {
-      agentByTask.set(agent.taskId, agent)
+    const key = `${agent.projectId}-${agent.taskId}`
+    const existing = agentByTask.get(key)
+    if (!existing) {
+      agentByTask.set(key, agent)
+    } else {
+      const agentIsActive = ACTIVE_AGENT_STATES.includes(agent.state)
+      const existingIsActive = ACTIVE_AGENT_STATES.includes(existing.state)
+      // Active beats finished; among equal activity level, prefer more recent startedAt
+      if (agentIsActive && !existingIsActive) {
+        agentByTask.set(key, agent)
+      } else if (agentIsActive === existingIsActive && agent.startedAt > existing.startedAt) {
+        agentByTask.set(key, agent)
+      }
     }
   }
 
-  // Tasks with an active agent are hoisted into the running bucket regardless of stored bucket
+  // Tasks with an ACTIVE agent are hoisted into the running bucket regardless of stored bucket.
+  // Finished agents (completed/errored/suspended) do NOT trigger a hoist — those tasks stay in
+  // their own bucket so they remain actionable (e.g. a ready task keeps its Launch button).
+  const isActivelyRunning = (t: Task) => {
+    const a = agentByTask.get(`${t.projectId}-${t.id}`)
+    return !!a && ACTIVE_AGENT_STATES.includes(a.state)
+  }
   const tasksByBucket: Record<Bucket, Task[]> = {
-    running: sortByPriority(filteredTasks.filter(t => t.bucket === 'running' || agentByTask.has(t.id))),
-    review: sortByPriority(filteredTasks.filter(t => t.bucket === 'review' && !agentByTask.has(t.id))),
-    ready: sortByPriority(filteredTasks.filter(t => t.bucket === 'ready' && !agentByTask.has(t.id))),
-    'needs-planning': sortByPriority(filteredTasks.filter(t => t.bucket === 'needs-planning' && !agentByTask.has(t.id))),
-    blocked: sortByPriority(filteredTasks.filter(t => t.bucket === 'blocked' && !agentByTask.has(t.id))),
-    manual: sortByPriority(filteredTasks.filter(t => t.bucket === 'manual' && !agentByTask.has(t.id))),
-    done: sortByPriority(filteredTasks.filter(t => t.bucket === 'done' && !agentByTask.has(t.id))),
+    running: sortByPriority(filteredTasks.filter(t => t.bucket === 'running' || isActivelyRunning(t))),
+    review: sortByPriority(filteredTasks.filter(t => t.bucket === 'review' && !isActivelyRunning(t))),
+    ready: sortByPriority(filteredTasks.filter(t => t.bucket === 'ready' && !isActivelyRunning(t))),
+    'needs-planning': sortByPriority(filteredTasks.filter(t => t.bucket === 'needs-planning' && !isActivelyRunning(t))),
+    blocked: sortByPriority(filteredTasks.filter(t => t.bucket === 'blocked' && !isActivelyRunning(t))),
+    manual: sortByPriority(filteredTasks.filter(t => t.bucket === 'manual' && !isActivelyRunning(t))),
+    done: sortByPriority(filteredTasks.filter(t => t.bucket === 'done' && !isActivelyRunning(t))),
   }
 
-  // Focus mode: highlight review if it has items, else ready, else nothing
-  const focusBucket: Bucket | null =
-    tasksByBucket.review.length > 0 ? 'review' :
-    tasksByBucket.ready.length > 0 ? 'ready' :
-    null
-
-  function handleDelete(taskId: number) {
-    send({ type: 'delete_task', projectId: currentProject, taskId })
-  }
 
   function toggleSelect(taskId: number) {
     setSelectedIds(prev => {
@@ -154,21 +161,20 @@ export default function TaskBoard({ tasks, agents, send, currentProject, promptL
     return `${task.projectId}-${task.id}`
   }
 
-  function renderTaskCard(task: Task, cardBorderClass: string, leftBorderClass?: string) {
+  function renderTaskCard(task: Task) {
     return (
       <TaskCard
         key={taskKey(task)}
-        borderClass={cardBorderClass}
-        leftBorderClass={leftBorderClass}
         task={task}
-        activeAgent={agentByTask.get(task.id) ?? null}
+        agent={agentByTask.get(`${task.projectId}-${task.id}`) ?? null}
         onSpawn={(mode) => {
           setDefaultMode(mode)
           setSpawnTask(task)
         }}
         onEdit={(t) => setEditTask(t)}
-        onDelete={handleDelete}
-        onMarkDone={(taskId) => send({ type: 'update_task', projectId: currentProject, taskId, patch: { status: 'done' } })}
+        onDelete={() => send({ type: 'delete_task', projectId: task.projectId, taskId: task.id })}
+        onMarkDone={() => send({ type: 'update_task', projectId: task.projectId, taskId: task.id, patch: { status: 'done' } })}
+        onRestore={() => send({ type: 'update_task', projectId: task.projectId, taskId: task.id, patch: { status: 'ready' } })}
         selectionMode={selectionMode}
         selected={selectedIds.has(task.id)}
         onToggleSelect={() => toggleSelect(task.id)}
@@ -176,12 +182,7 @@ export default function TaskBoard({ tasks, agents, send, currentProject, promptL
           const proj = projects.find(p => p.id === task.projectId)
           return proj ? proj.name : undefined
         })() : undefined}
-        onNavigateQueue={
-          (task.status === 'plan-review' || task.status === 'in-review')
-            ? () => onNavigateQueue?.()
-            : undefined
-        }
-        onViewPlan={requestPlanContent && task.status !== 'needs-planning' ? () => {
+        onViewPlan={requestPlanContent && task.hasPlan ? () => {
           const proj = projects.find(p => p.id === task.projectId)
           setPendingPlanView({ taskId: task.id, taskName: task.name, projectName: proj?.name })
           requestPlanContent(task.id, task.projectId)
@@ -192,14 +193,16 @@ export default function TaskBoard({ tasks, agents, send, currentProject, promptL
         )}
         send={send}
         onViewTerminal={onViewTerminal}
-        onNavigateAgents={onNavigateAgents}
-        preferences={preferences}
+        diffs={diffs}
+        requestDiff={requestDiff}
+        projects={projects}
       />
     )
   }
 
   return (
     <div>
+      <NeedsYouStrip items={queue} agents={agents} projects={projects} send={send} />
       <TaskFilterBar
         tasks={tasks}
         filters={effectiveFilters}
@@ -233,28 +236,25 @@ export default function TaskBoard({ tasks, agents, send, currentProject, promptL
         </div>
       )}
 
-      {/* Data-driven bucket rendering */}
-      {BUCKET_ORDER.map(({ key, label, accent, collapsible }) => {
+      {/* Bucketed view (default) */}
+      {viewMode === 'bucketed' && BUCKET_ORDER.map(({ key, label, collapsible }) => {
         const bucketTasks = tasksByBucket[key]
         if (bucketTasks.length === 0) return null
-        const isFocused = focusBucket === key
-        const borderClass = isFocused ? BORDER_COLORS[accent].focused : BORDER_COLORS[accent].normal
-        const leftBorder = LEFT_BORDER_COLORS[accent]
 
         if (collapsible) {
           return (
             <div key={key} className="mb-6">
               <button
                 onClick={() => setDoneExpanded(prev => !prev)}
-                className="text-sm font-sans font-bold text-gray-400 uppercase tracking-wide mb-3 flex items-center gap-1 w-full hover:text-gray-300 transition-colors"
+                className="text-sm font-sans font-bold text-gray-400 uppercase tracking-wide mb-2 flex items-center justify-start gap-1 w-full hover:text-gray-300 transition-colors"
               >
                 <span className="text-xs">{doneExpanded ? '▼' : '▶'}</span>
                 {label}
                 <span className="ml-1 text-gray-500">({bucketTasks.length})</span>
               </button>
               {doneExpanded && (
-                <div className="grid gap-3">
-                  {bucketTasks.map(t => renderTaskCard(t, borderClass, leftBorder))}
+                <div className="grid gap-2">
+                  {bucketTasks.map(t => renderTaskCard(t))}
                 </div>
               )}
             </div>
@@ -262,17 +262,62 @@ export default function TaskBoard({ tasks, agents, send, currentProject, promptL
         }
 
         return (
-          <div key={key} className="mt-8 mb-6">
-            <div className="text-sm font-sans font-bold text-gray-400 uppercase tracking-wide mb-3">
+          <div key={key} className="mb-6">
+            <div className="text-sm font-sans font-bold text-gray-400 uppercase tracking-wide mb-2 flex items-center gap-1.5">
+              {key === 'running' && <StatusIndicator color="text-blue-400" pulse />}
               {label}
-              <span className="ml-2 text-gray-500">({bucketTasks.length})</span>
+              <span className="ml-1 text-gray-500">({bucketTasks.length})</span>
             </div>
-            <div className="grid gap-3">
-              {bucketTasks.map(t => renderTaskCard(t, borderClass, leftBorder))}
+            <div className="grid gap-2">
+              {bucketTasks.map(t => renderTaskCard(t))}
             </div>
           </div>
         )
       })}
+
+      {/* Ranked view — flat list sorted by score descending */}
+      {viewMode === 'ranked' && (() => {
+        const activeTasks = sortByScore(filteredTasks.filter(t => t.bucket !== 'done'))
+        const doneTasks = sortByScore(filteredTasks.filter(t => t.bucket === 'done'))
+        return (
+          <>
+            <div className="text-sm font-sans font-bold text-gray-400 uppercase tracking-wide mb-2 flex items-center gap-1.5">
+              Ranked Queue
+              <span className="ml-1 text-gray-500">({activeTasks.length})</span>
+            </div>
+            <div className="grid gap-2 mb-6">
+              {activeTasks.map((t, i) => (
+                <div key={taskKey(t)} className="flex items-start gap-2">
+                  <span className="text-xs text-gray-600 font-mono mt-3.5 w-5 text-right flex-shrink-0">{i + 1}</span>
+                  <span className="mt-3.5 flex-shrink-0">
+                    <StatusIndicator color={t.status === 'in-progress' ? 'text-blue-400' : 'text-gray-600'} pulse={t.status === 'in-progress'} />
+                  </span>
+                  <div className="flex-1">
+                    {renderTaskCard(t)}
+                  </div>
+                </div>
+              ))}
+            </div>
+            {doneTasks.length > 0 && (
+              <div className="mb-6">
+                <button
+                  onClick={() => setDoneExpanded(prev => !prev)}
+                  className="text-sm font-sans font-bold text-gray-400 uppercase tracking-wide mb-2 flex items-center justify-start gap-1 w-full hover:text-gray-300 transition-colors"
+                >
+                  <span className="text-xs">{doneExpanded ? '▼' : '▶'}</span>
+                  Done
+                  <span className="ml-1 text-gray-500">({doneTasks.length})</span>
+                </button>
+                {doneExpanded && (
+                  <div className="grid gap-2">
+                    {doneTasks.map(t => renderTaskCard(t))}
+                  </div>
+                )}
+              </div>
+            )}
+          </>
+        )
+      })()}
 
       {filteredTasks.length === 0 && tasks.length > 0 && (
         <p className="text-gray-500 text-center py-12">No tasks match the current filters.</p>
@@ -289,7 +334,6 @@ export default function TaskBoard({ tasks, agents, send, currentProject, promptL
           send={send}
           onClose={() => setSpawnTask(null)}
           promptLibrary={promptLibrary}
-          preferences={preferences[defaultMode]}
         />
       )}
 
@@ -297,7 +341,7 @@ export default function TaskBoard({ tasks, agents, send, currentProject, promptL
         <TaskEditDialog
           task={editTask}
           categories={categories}
-          projectId={currentProject}
+          projectId={editTask?.projectId ?? currentProject}
           send={send}
           onClose={() => { setEditTask(null); onCloseCreate() }}
         />

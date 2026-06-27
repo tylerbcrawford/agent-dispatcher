@@ -1,7 +1,7 @@
 // @vitest-environment happy-dom
 import { describe, it, expect, vi } from 'vitest'
 import '@testing-library/jest-dom/vitest'
-import { render, screen } from '@testing-library/react'
+import { render, screen, fireEvent } from '@testing-library/react'
 import TaskBoard from '../components/TaskBoard'
 import type { Task, ProjectConfig } from '@shared/types'
 
@@ -14,16 +14,9 @@ function makeTask(overrides: Partial<Task> = {}): Task {
     id: 1, projectId: 'test', name: 'Test Task', emoji: '', category: 'Infra',
     priority: 'MEDIUM', timeEstimate: '30 min', timeMinutes: 30,
     status: 'ready', description: 'desc', planLink: null,
-    affects: [], depends: [], bucket: 'ready',
+    affects: [], depends: [], bucket: 'ready', score: null,
     ...overrides,
   }
-}
-
-const defaultPreferences = {
-  plan:      { model: 'haiku',  providerId: 'claude' as const, profile: 'read-only' },
-  implement: { model: 'haiku',  providerId: 'claude' as const, profile: 'standard' },
-  audit:     { model: 'haiku',  providerId: 'claude' as const, profile: 'read-only' },
-  fix:       { model: 'haiku',  providerId: 'claude' as const, profile: 'standard' },
 }
 
 const defaultProps = {
@@ -35,9 +28,12 @@ const defaultProps = {
   showAllProjects: false,
   showCreate: false,
   onCloseCreate: vi.fn(),
+  queue: [],
   selectionMode: false,
   onExitSelectionMode: vi.fn(),
-  preferences: defaultPreferences,
+  onViewTerminal: vi.fn(),
+  diffs: {},
+  requestDiff: vi.fn(),
 }
 
 describe('TaskBoard', () => {
@@ -131,5 +127,33 @@ describe('TaskBoard', () => {
       />
     )
     expect(screen.getByText('No tasks match the current filters.')).toBeInTheDocument()
+  })
+
+  it('uses the task project when marking done from all-projects view', () => {
+    const send = vi.fn()
+    render(
+      <TaskBoard
+        tasks={[makeTask({ id: 7, projectId: 'beta', name: 'Cross Project Task' })]}
+        {...defaultProps}
+        send={send}
+        currentProject="alpha"
+        showAllProjects={true}
+        projects={[
+          { id: 'alpha', name: 'Alpha', todoFile: '', icon: '', active: true },
+          { id: 'beta', name: 'Beta', todoFile: '', icon: '', active: true },
+        ] as ProjectConfig[]}
+      />
+    )
+
+    fireEvent.click(screen.getByText('Cross Project Task'))
+    fireEvent.click(screen.getByText('···'))
+    fireEvent.click(screen.getByTitle('Mark done'))
+
+    expect(send).toHaveBeenCalledWith({
+      type: 'update_task',
+      projectId: 'beta',
+      taskId: 7,
+      patch: { status: 'done' },
+    })
   })
 })

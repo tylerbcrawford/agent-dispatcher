@@ -10,7 +10,7 @@ function makeTask(overrides: Partial<Task> = {}): Task {
     id: 1, projectId: 'test', name: 'Test Task', emoji: '', category: 'Infra',
     priority: 'MEDIUM', timeEstimate: '30 min', timeMinutes: 30,
     status: 'ready', description: 'A test task', planLink: null,
-    affects: ['docker'], depends: [], bucket: 'ready',
+    affects: ['docker'], depends: [], bucket: 'ready', score: null,
     ...overrides,
   }
 }

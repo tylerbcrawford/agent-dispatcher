@@ -10,10 +10,10 @@ interface Props {
 }
 
 const STATUS_DISPLAY: Record<string, { color: string; shape: 'circle' | 'diamond' | 'triangle' }> = {
-  pass: { color: 'text-green-400', shape: 'circle' },
+  pass: { color: 'text-gray-300', shape: 'circle' },
   fail: { color: 'text-red-400', shape: 'triangle' },
   skip: { color: 'text-gray-500', shape: 'diamond' },
-  warn: { color: 'text-yellow-400', shape: 'triangle' },
+  warn: { color: 'text-gray-400', shape: 'triangle' },
 }
 
 export default function VerificationViewer({ report, onApprove, onReject }: Props) {
@@ -58,7 +58,7 @@ export default function VerificationViewer({ report, onApprove, onReject }: Prop
       <div className="flex gap-2 mt-2">
         <button
           onClick={() => onApprove(feedback.trim() || undefined)}
-          className="text-xs bg-green-600 hover:bg-green-500 text-white px-3 py-1.5 rounded transition-colors"
+          className="text-xs bg-blue-600 hover:bg-blue-500 text-white px-3 py-1.5 rounded transition-colors"
         >
           Approve
         </button>

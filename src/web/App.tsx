@@ -2,41 +2,33 @@
 import { useState, useEffect, useRef } from 'react'
 import { useWebSocket } from './hooks/useWebSocket'
 import TaskBoard from './components/TaskBoard'
-import AgentPanel from './components/AgentPanel'
-import HumanWorkQueue from './components/HumanWorkQueue'
-import PromptsPage from './components/PromptsPage'
 import Terminal from './components/Terminal'
 import AddProjectDialog from './components/AddProjectDialog'
+import ManageGroupsDialog from './components/ManageGroupsDialog'
+import SettingsModal from './components/SettingsModal'
 import StatusIndicator from './components/StatusIndicator'
-import SettingsDialog from './components/SettingsDialog'
-import { HamburgerIcon, CloseIcon, ChevronDownIcon, PlusIcon, SearchIcon, FilterIcon } from './components/icons'
-import { usePreferences } from './hooks/usePreferences'
+import { HamburgerIcon, CloseIcon, ChevronDownIcon, PlusIcon, SearchIcon, FilterIcon, GearIcon } from './components/icons'
+import ProjectPicker from './components/ProjectPicker'
 import type { ClientMessage } from '@shared/types'
-
-type View = 'tasks' | 'agents' | 'queue' | 'prompts'
+import type { ViewMode } from './components/TaskBoard'
 
 export default function App() {
-  const [view, setView] = useState<View>('tasks')
+  const [showSettings, setShowSettings] = useState(false)
   const [activeTerminal, setActiveTerminal] = useState<string | null>(null)
   const [showAddProject, setShowAddProject] = useState(false)
+  const [showManageGroups, setShowManageGroups] = useState(false)
   const [showCreate, setShowCreate] = useState(false)
   const [selectionMode, setSelectionMode] = useState(false)
   const [menuOpen, setMenuOpen] = useState(false)
   const [searchText, setSearchText] = useState('')
   const [filtersExpanded, setFiltersExpanded] = useState(false)
   const [projectDropdownOpen, setProjectDropdownOpen] = useState(false)
-  const [showSettings, setShowSettings] = useState(false)
+  const [viewMode, setViewMode] = useState<ViewMode>('bucketed')
+  const [projectSort, setProjectSort] = useState<'weight' | 'alpha'>(
+    () => (localStorage.getItem('ac_projectSort') as 'weight' | 'alpha') ?? 'weight'
+  )
   const menuRef = useRef<HTMLDivElement>(null)
-  const projectDropdownRef = useRef<HTMLDivElement>(null)
-  const { tasks, agents, queue, projects, currentProject, promptLibrary, showAllProjects, switchProject, toggleShowAll, createProject, send, connected, terminalOutput, diffs, requestDiff, planContents, requestPlanContent, taskWriteError, promptTemplates, requestPromptTemplates } = useWebSocket()
-  const { defaults: preferences, updateDefaults: updatePreferences } = usePreferences()
-
-  const navItems: { id: View; label: string; badge?: number }[] = [
-    { id: 'tasks', label: 'Tasks' },
-    { id: 'agents', label: 'Agents', badge: agents.filter(a => a.state === 'running').length || undefined },
-    { id: 'queue', label: 'Queue', badge: queue.filter(i => !i.dismissed).length || undefined },
-    { id: 'prompts', label: 'Prompts' },
-  ]
+  const { tasks, agents, queue, projects, groups, currentProject, promptLibrary, showAllProjects, switchProject, toggleShowAll, createProject, updateGroups, send, connected, terminalOutput, diffs, requestDiff, planContents, requestPlanContent, taskWriteError, promptTemplates, requestPromptTemplates, scoring, rescoreAll } = useWebSocket()
 
   const currentProjectConfig = projects.find(p => p.id === currentProject)
   const reviewCount = showAllProjects
@@ -55,26 +47,27 @@ export default function App() {
     return () => document.removeEventListener('mousedown', handleClick)
   }, [menuOpen])
 
-  // Click-outside to close project dropdown
+  // Ctrl+K / Cmd+K to toggle project picker
   useEffect(() => {
-    if (!projectDropdownOpen) return
-    function handleClick(e: MouseEvent) {
-      if (projectDropdownRef.current && !projectDropdownRef.current.contains(e.target as Node)) {
-        setProjectDropdownOpen(false)
+    function handleKeyDown(e: KeyboardEvent) {
+      if ((e.ctrlKey || e.metaKey) && e.key === 'k') {
+        e.preventDefault()
+        setProjectDropdownOpen(prev => !prev)
+        setMenuOpen(false)
       }
     }
-    document.addEventListener('mousedown', handleClick)
-    return () => document.removeEventListener('mousedown', handleClick)
-  }, [projectDropdownOpen])
+    document.addEventListener('keydown', handleKeyDown)
+    return () => document.removeEventListener('keydown', handleKeyDown)
+  }, [])
 
   return (
     <div className="flex flex-col h-dvh">
       {/* Top bar */}
-      <header className="h-12 bg-gray-900 border-b border-gray-700 flex items-center justify-between px-4 flex-shrink-0 relative z-50">
+      <header className="h-12 bg-gray-900 border-b border-gray-700 flex items-center gap-2 px-4 flex-shrink-0 relative z-50">
         {/* Left: hamburger */}
-        <div className="flex items-center" ref={menuRef}>
+        <div className="flex items-center flex-shrink-0" ref={menuRef}>
           <button
-            onClick={() => setMenuOpen(prev => !prev)}
+            onClick={() => { setMenuOpen(prev => !prev); setProjectDropdownOpen(false) }}
             className="text-gray-400 hover:text-white transition-colors p-1"
           >
             {menuOpen ? <CloseIcon /> : <HamburgerIcon />}
@@ -82,57 +75,78 @@ export default function App() {
 
           {/* Hamburger dropdown */}
           {menuOpen && (
-            <div className="absolute top-12 left-0 w-full bg-gray-900 border-b border-gray-700 shadow-lg z-50">
-              {/* Nav items — text only */}
-              <div className="px-4 py-2">
-                {navItems.map(item => (
-                  <button
-                    key={item.id}
-                    onClick={() => { setView(item.id); setMenuOpen(false) }}
-                    className={`w-full flex items-center justify-between px-3 py-2.5 rounded transition-colors text-sm ${
-                      view === item.id ? 'bg-gray-800 text-white' : 'text-gray-400 hover:bg-gray-800 hover:text-gray-200'
-                    }`}
-                  >
-                    <span>{item.label}</span>
-                    {item.badge ? (
-                      <span className="bg-blue-600 text-xs px-1.5 py-0.5 rounded text-white">{item.badge}</span>
-                    ) : null}
-                  </button>
-                ))}
+            <div className="absolute top-12 left-0 w-full bg-gray-900 border-b border-gray-700 z-50">
+              {/* All Projects views */}
+              <div className="px-4 py-2 space-y-1">
+                <button
+                  onClick={() => { if (!showAllProjects) toggleShowAll(); setViewMode('bucketed'); setMenuOpen(false) }}
+                  className={`w-full px-3 py-2.5 text-left text-sm rounded transition-colors ${
+                    showAllProjects && viewMode === 'bucketed'
+                      ? 'bg-gray-800 text-white'
+                      : 'text-gray-400 hover:bg-gray-800 hover:text-gray-200'
+                  }`}
+                >
+                  All Projects (Bucketed)
+                </button>
+                <button
+                  onClick={() => { if (!showAllProjects) toggleShowAll(); setViewMode('ranked'); setMenuOpen(false) }}
+                  className={`w-full px-3 py-2.5 text-left text-sm rounded transition-colors ${
+                    showAllProjects && viewMode === 'ranked'
+                      ? 'bg-gray-800 text-white'
+                      : 'text-gray-400 hover:bg-gray-800 hover:text-gray-200'
+                  }`}
+                >
+                  All Projects (Ranked)
+                </button>
+              </div>
+
+              {/* Project admin */}
+              <div className="border-t border-gray-700 px-4 py-2 space-y-1">
+                <button
+                  onClick={() => { setShowAddProject(true); setMenuOpen(false) }}
+                  className="w-full px-3 py-2.5 text-left text-sm text-gray-400 hover:bg-gray-800 hover:text-gray-200 rounded transition-colors"
+                >
+                  + New Project
+                </button>
+                <button
+                  onClick={() => { setShowManageGroups(true); setMenuOpen(false) }}
+                  className="w-full px-3 py-2.5 text-left text-sm text-gray-400 hover:bg-gray-800 hover:text-gray-200 rounded transition-colors flex items-center gap-1"
+                >
+                  <GearIcon className="w-3 h-3" />
+                  Manage Groups
+                </button>
               </div>
 
               {/* Task actions */}
-              {view === 'tasks' && (
-                <div className="border-t border-gray-700 px-4 py-2 space-y-1">
-                  <div className="relative">
-                    <SearchIcon className="absolute left-3 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-gray-500 pointer-events-none" />
-                    <input
-                      type="text"
-                      value={searchText}
-                      onChange={e => setSearchText(e.target.value)}
-                      onKeyDown={e => { if (e.key === 'Escape') setSearchText('') }}
-                      placeholder="Search tasks..."
-                      className={`w-full bg-gray-800 border rounded pl-8 pr-8 py-2 text-sm placeholder-gray-500 focus:outline-none transition-colors ${
-                        searchText ? 'border-blue-500 text-blue-100' : 'border-gray-600 text-gray-200 focus:border-gray-500'
-                      }`}
-                    />
-                    {searchText && (
-                      <button
-                        onClick={() => setSearchText('')}
-                        className="absolute right-2.5 top-1/2 -translate-y-1/2 text-gray-500 hover:text-gray-300 transition-colors"
-                      >
-                        <CloseIcon className="w-3.5 h-3.5" />
-                      </button>
-                    )}
-                  </div>
-                  <button
-                    onClick={() => { setSelectionMode(true); setMenuOpen(false) }}
-                    className="w-full px-3 py-2.5 text-left text-sm text-gray-400 hover:bg-gray-800 hover:text-gray-200 rounded transition-colors"
-                  >
-                    Select Tasks
-                  </button>
+              <div className="border-t border-gray-700 px-4 py-2 space-y-1">
+                <div className="relative">
+                  <SearchIcon className="absolute left-3 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-gray-500 pointer-events-none" />
+                  <input
+                    type="text"
+                    value={searchText}
+                    onChange={e => setSearchText(e.target.value)}
+                    onKeyDown={e => { if (e.key === 'Escape') setSearchText('') }}
+                    placeholder="Search tasks..."
+                    className={`w-full bg-gray-800 border rounded pl-8 pr-8 py-2 text-sm placeholder-gray-500 focus:outline-none transition-colors ${
+                      searchText ? 'border-blue-500 text-blue-100' : 'border-gray-600 text-gray-200 focus:border-gray-500'
+                    }`}
+                  />
+                  {searchText && (
+                    <button
+                      onClick={() => setSearchText('')}
+                      className="absolute right-2.5 top-1/2 -translate-y-1/2 text-gray-500 hover:text-gray-300 transition-colors"
+                    >
+                      <CloseIcon className="w-3.5 h-3.5" />
+                    </button>
+                  )}
                 </div>
-              )}
+                <button
+                  onClick={() => { setSelectionMode(true); setMenuOpen(false) }}
+                  className="w-full px-3 py-2.5 text-left text-sm text-gray-400 hover:bg-gray-800 hover:text-gray-200 rounded transition-colors"
+                >
+                  Select Tasks
+                </button>
+              </div>
 
               {/* Close terminal link */}
               {activeTerminal && (
@@ -145,28 +159,21 @@ export default function App() {
                   </button>
                 </div>
               )}
-
-              {/* Settings */}
-              <div className="border-t border-gray-700 px-4 py-2">
-                <button
-                  onClick={() => { setShowSettings(true); setMenuOpen(false) }}
-                  className="w-full px-3 py-2.5 text-left text-sm text-gray-400 hover:bg-gray-800 hover:text-gray-200 rounded transition-colors"
-                >
-                  Settings
-                </button>
-              </div>
             </div>
           )}
         </div>
 
-        {/* Center: tappable project switcher dropdown */}
-        <div ref={projectDropdownRef} className="absolute left-1/2 -translate-x-1/2 max-w-[60%]">
+        {/* Center: tappable project switcher trigger — flex-centered between the two clusters so it truncates instead of overlapping them */}
+        <div className="flex-1 min-w-0 flex justify-center">
           <button
-            onClick={() => setProjectDropdownOpen(prev => !prev)}
-            className="flex items-center gap-1 font-heading font-bold text-sm hover:text-gray-300 transition-colors truncate"
+            data-picker-trigger
+            onClick={() => { setProjectDropdownOpen(prev => !prev); if (!projectDropdownOpen) setMenuOpen(false) }}
+            className="flex items-center gap-1 font-heading font-bold text-sm hover:text-gray-300 transition-colors truncate min-w-0 max-w-full"
           >
             <span className="truncate">
-              {showAllProjects ? 'All Projects' : (currentProjectConfig?.name ?? 'Agent Dispatcher')}
+              {showAllProjects
+                ? (viewMode === 'ranked' ? 'Ranked Queue' : 'All Projects')
+                : (currentProjectConfig?.name ?? 'Agent Dispatcher')}
             </span>
             <ChevronDownIcon className={`w-3 h-3 text-gray-500 transition-transform flex-shrink-0 ${projectDropdownOpen ? 'rotate-180' : ''}`} />
             {reviewCount > 0 && (
@@ -175,79 +182,38 @@ export default function App() {
               </span>
             )}
           </button>
-
-          {projectDropdownOpen && (
-            <div className="absolute top-full left-1/2 -translate-x-1/2 mt-2 bg-gray-800 border border-gray-600 rounded-lg shadow-lg z-50 min-w-[200px] py-1">
-              {/* Project list */}
-              {projects.map(p => {
-                const projectQueueCount = queue.filter(i => !i.dismissed && i.projectId === p.id).length
-                return (
-                  <button
-                    key={p.id}
-                    onClick={() => { switchProject(p.id); setProjectDropdownOpen(false) }}
-                    className={`w-full px-3 py-2 text-sm transition-colors flex items-center justify-center gap-1.5 ${
-                      !showAllProjects && currentProject === p.id
-                        ? 'bg-gray-700 text-white'
-                        : 'text-gray-400 hover:bg-gray-700 hover:text-gray-200'
-                    }`}
-                  >
-                    <span>{p.name}</span>
-                    {projectQueueCount > 0 && (
-                      <span className="text-blue-400 text-xs font-normal">· {projectQueueCount}</span>
-                    )}
-                  </button>
-                )
-              })}
-
-              <div className="border-t border-gray-700 my-1" />
-
-              {/* All Projects toggle */}
-              <button
-                onClick={() => { toggleShowAll(); setProjectDropdownOpen(false) }}
-                className={`w-full px-3 py-2 text-center text-xs transition-colors ${
-                  showAllProjects
-                    ? 'text-blue-300 bg-blue-900/30'
-                    : 'text-gray-500 hover:bg-gray-700 hover:text-gray-300'
-                }`}
-              >
-                All Projects
-              </button>
-
-              {/* Add project */}
-              <button
-                onClick={() => { setShowAddProject(true); setProjectDropdownOpen(false) }}
-                className="w-full px-3 py-2 text-center text-xs text-gray-500 hover:bg-gray-700 hover:text-gray-300 transition-colors"
-              >
-                + New Project
-              </button>
-            </div>
-          )}
         </div>
 
-        {/* Right: connection status + filter + new task button */}
-        <div className="flex items-center gap-3">
-          <StatusIndicator color={connected ? 'text-green-400' : 'text-red-400'} pulse={connected} />
-          <span className={`text-xs hidden sm:inline ${connected ? 'text-green-400' : 'text-red-400'}`}>
-            {connected ? 'Connected' : 'Disconnected'}
-          </span>
-          {view === 'tasks' && (
+        {/* Full-width project picker panel */}
+        <ProjectPicker
+          open={projectDropdownOpen}
+          projects={projects}
+          groups={groups}
+          queue={queue}
+          currentProject={currentProject}
+          showAllProjects={showAllProjects}
+          projectSort={projectSort}
+          onSelectProject={(id) => { switchProject(id); setProjectDropdownOpen(false) }}
+          onSortChange={setProjectSort}
+          onClose={() => setProjectDropdownOpen(false)}
+        />
+
+        {/* Right: connection status + settings only — task-scoped actions live in the board toolbar */}
+        <div className="flex items-center gap-2 flex-shrink-0">
+          {/* Status only surfaces when something's wrong — a healthy connection shows nothing (calm by default) */}
+          {!connected && (
             <>
-              <button
-                onClick={() => setFiltersExpanded(prev => !prev)}
-                className={`transition-colors p-1 ${filtersExpanded ? 'text-blue-400' : 'text-gray-400 hover:text-white'}`}
-                title="Filters"
-              >
-                <FilterIcon />
-              </button>
-              <button
-                onClick={() => setShowCreate(true)}
-                className="text-gray-400 hover:text-white transition-colors p-1"
-                title="New Task"
-              >
-                <PlusIcon />
-              </button>
+              <StatusIndicator color="text-red-400" pulse />
+              <span className="text-xs hidden sm:inline text-red-400">Disconnected</span>
             </>
           )}
+          <button
+            onClick={() => setShowSettings(true)}
+            className="text-gray-400 hover:text-white transition-colors p-1"
+            title="Settings"
+          >
+            <GearIcon />
+          </button>
         </div>
       </header>
 
@@ -255,42 +221,64 @@ export default function App() {
       <div className="flex-1 flex flex-col overflow-hidden">
         <main className={`flex-1 overflow-auto p-4 md:p-8 ${activeTerminal ? 'h-1/2' : ''}`}>
           <div className="max-w-3xl mx-auto">
-            {view === 'tasks' && (
-              <TaskBoard
-                tasks={tasks}
-                agents={agents}
-                send={send}
-                currentProject={currentProject}
-                promptLibrary={promptLibrary}
-                projects={projects}
-                showAllProjects={showAllProjects}
-                showCreate={showCreate}
-                onCloseCreate={() => setShowCreate(false)}
-                selectionMode={selectionMode}
-                onExitSelectionMode={() => setSelectionMode(false)}
-                onNavigateQueue={() => setView('queue')}
-                onNavigateAgents={() => setView('agents')}
-                onViewTerminal={(id) => setActiveTerminal(id)}
-                searchText={searchText}
-                filtersExpanded={filtersExpanded}
-                onToggleFilters={() => setFiltersExpanded(prev => !prev)}
-                planContents={planContents}
-                requestPlanContent={requestPlanContent}
-                preferences={preferences}
-              />
-            )}
-            {view === 'agents' && (
-              <AgentPanel
-                agents={agents}
-                projects={projects}
-                send={send}
-                onViewTerminal={(id) => setActiveTerminal(id)}
-                diffs={diffs}
-                requestDiff={requestDiff}
-              />
-            )}
-            {view === 'queue' && <HumanWorkQueue items={queue} agents={agents} projects={projects} send={send} />}
-            {view === 'prompts' && <PromptsPage templates={promptTemplates} requestTemplates={requestPromptTemplates} send={send} />}
+            {/* Board toolbar — task-scoped actions relocated out of the header */}
+            <div className="flex items-center gap-2 mb-4">
+              <button
+                onClick={() => setFiltersExpanded(prev => !prev)}
+                className={`flex items-center gap-1.5 text-xs px-2.5 py-1.5 rounded border transition-colors ${
+                  filtersExpanded
+                    ? 'border-blue-500/50 text-blue-300 bg-blue-950/40'
+                    : 'border-gray-700 text-gray-400 hover:border-gray-500 hover:text-gray-300'
+                }`}
+              >
+                <FilterIcon />
+                Filters
+              </button>
+              <div className="flex-1" />
+              <button
+                onClick={rescoreAll}
+                disabled={scoring}
+                className={`flex items-center gap-1.5 text-xs px-2.5 py-1.5 rounded border border-gray-700 transition-colors ${
+                  scoring ? 'text-blue-400 cursor-wait' : 'text-gray-400 hover:border-gray-500 hover:text-gray-300'
+                }`}
+                title={scoring ? 'Scoring...' : 'Rescore all tasks'}
+              >
+                <svg className={`w-3.5 h-3.5 ${scoring ? 'animate-spin' : ''}`} fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                  <path strokeLinecap="round" strokeLinejoin="round" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
+                </svg>
+                Rescore
+              </button>
+              <button
+                onClick={() => setShowCreate(true)}
+                className="flex items-center gap-1.5 text-xs px-2.5 py-1.5 rounded bg-blue-500 hover:bg-blue-500/80 text-white transition-colors"
+              >
+                <PlusIcon />
+                New
+              </button>
+            </div>
+            <TaskBoard
+              tasks={tasks}
+              agents={agents}
+              queue={queue}
+              send={send}
+              currentProject={currentProject}
+              promptLibrary={promptLibrary}
+              projects={projects}
+              showAllProjects={showAllProjects}
+              showCreate={showCreate}
+              onCloseCreate={() => setShowCreate(false)}
+              selectionMode={selectionMode}
+              onExitSelectionMode={() => setSelectionMode(false)}
+              searchText={searchText}
+              filtersExpanded={filtersExpanded}
+              onToggleFilters={() => setFiltersExpanded(prev => !prev)}
+              planContents={planContents}
+              requestPlanContent={requestPlanContent}
+              viewMode={showAllProjects ? viewMode : 'bucketed'}
+              onViewTerminal={(id) => setActiveTerminal(id)}
+              diffs={diffs}
+              requestDiff={requestDiff}
+            />
           </div>
         </main>
 
@@ -307,11 +295,22 @@ export default function App() {
           onCreate={createProject}
         />
 
-        <SettingsDialog
+        <ManageGroupsDialog
+          open={showManageGroups}
+          onClose={() => setShowManageGroups(false)}
+          groups={groups}
+          projects={projects}
+          onSave={updateGroups}
+        />
+
+        <SettingsModal
           open={showSettings}
           onClose={() => setShowSettings(false)}
-          defaults={preferences}
-          updateDefaults={updatePreferences}
+          templates={promptTemplates}
+          requestTemplates={requestPromptTemplates}
+          projects={projects}
+          scoring={scoring}
+          send={send}
         />
 
         {/* Terminal drawer */}

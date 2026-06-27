@@ -1,8 +1,6 @@
 // src/web/components/SpawnDialog.tsx
 import { useState, useMemo } from 'react'
 import type { Task, ClientMessage, RunMode, ExecutionMode, ProviderId, PromptLibraryMeta } from '@shared/types'
-import type { ModeDefaults } from '../hooks/usePreferences'
-import { PROVIDER_GROUPS, PROVIDER_LABEL_COLORS, PROVIDER_CHIP_ACTIVE, LAUNCH_BUTTON, PROFILES, getModelLabel, getProviderLabel } from '../lib/providers'
 import { ChevronDownIcon } from './icons'
 import { chipClass } from './styles'
 
@@ -12,7 +10,6 @@ interface Props {
   send: (msg: ClientMessage) => void
   onClose: () => void
   promptLibrary: PromptLibraryMeta | null
-  preferences: ModeDefaults
 }
 
 const RUN_MODES: { id: RunMode; label: string }[] = [
@@ -22,14 +19,74 @@ const RUN_MODES: { id: RunMode; label: string }[] = [
   { id: 'fix', label: 'Fix' },
 ]
 
-export default function SpawnDialog({ task, defaultMode, send, onClose, promptLibrary, preferences }: Props) {
+interface ProviderModelOption {
+  id: string        // model ID sent to runner (e.g. 'sonnet', 'gemini-2.5-flash')
+  label: string     // display label (e.g. 'Sonnet', 'Flash')
+  provider: ProviderId
+}
+
+const PROVIDER_GROUPS: { id: ProviderId; label: string; models: ProviderModelOption[] }[] = [
+  {
+    id: 'claude',
+    label: 'Claude',
+    models: [
+      { id: 'haiku', label: 'Haiku', provider: 'claude' },
+      { id: 'sonnet', label: 'Sonnet', provider: 'claude' },
+      { id: 'opus', label: 'Opus', provider: 'claude' },
+    ],
+  },
+  {
+    id: 'gemini',
+    label: 'Gemini',
+    models: [
+      { id: 'gemini-2.5-flash', label: 'Flash', provider: 'gemini' },
+      { id: 'gemini-2.5-pro', label: 'Pro', provider: 'gemini' },
+    ],
+  },
+  {
+    id: 'codex' as ProviderId,
+    label: 'Codex',
+    models: [
+      { id: 'o4-mini', label: 'o4-mini', provider: 'codex' as ProviderId },
+      { id: 'o3', label: 'o3', provider: 'codex' as ProviderId },
+      { id: 'gpt-4.1', label: 'GPT-4.1', provider: 'codex' as ProviderId },
+    ],
+  },
+]
+
+// Provider-specific colors — static maps for Tailwind JIT safety
+const PROVIDER_LABEL_COLORS: Record<ProviderId, string> = {
+  claude: 'text-blue-400',
+  gemini: 'text-yellow-400',
+  codex: 'text-green-400',
+}
+
+const PROVIDER_CHIP_ACTIVE: Record<ProviderId, string> = {
+  claude: 'border border-blue-500/50 text-blue-300 bg-blue-950/40',
+  gemini: 'border border-yellow-500/50 text-yellow-300 bg-yellow-950/40',
+  codex: 'border border-green-500/50 text-green-300 bg-green-950/40',
+}
+
+const LAUNCH_BUTTON: Record<ProviderId, string> = {
+  claude: 'border-blue-500/40 text-blue-300 hover:bg-blue-900/20 hover:border-blue-500/70',
+  gemini: 'border-yellow-500/40 text-yellow-300 hover:bg-yellow-900/20 hover:border-yellow-500/70',
+  codex: 'border-green-500/40 text-green-300 hover:bg-green-900/20 hover:border-green-500/70',
+}
+
+const PROFILES = [
+  { id: 'read-only', label: 'Read Only' },
+  { id: 'standard', label: 'Standard' },
+  { id: 'full-access', label: 'Full Access' },
+]
+
+export default function SpawnDialog({ task, defaultMode, send, onClose, promptLibrary }: Props) {
   const isPlanMode = defaultMode === 'plan'
 
   const [runMode, setRunMode] = useState<RunMode>(defaultMode)
-  const [model, setModel] = useState(preferences.model)
-  const [providerId, setProviderId] = useState<ProviderId>(preferences.providerId)
+  const [model, setModel] = useState('haiku')
+  const [providerId, setProviderId] = useState<ProviderId>('claude')
   const [executionMode, setExecutionMode] = useState<ExecutionMode>('single')
-  const [profile, setProfile] = useState(preferences.profile)
+  const [profile, setProfile] = useState(isPlanMode ? 'plan' : 'standard')
   const [timeLimit, setTimeLimit] = useState(isPlanMode ? 20 : 60)
   const [gitBranch, setGitBranch] = useState(!isPlanMode)
   const [customPrompt, setCustomPrompt] = useState('')
@@ -37,7 +94,6 @@ export default function SpawnDialog({ task, defaultMode, send, onClose, promptLi
   const [snippetIds, setSnippetIds] = useState<string[]>([])
   const [useModelHints, setUseModelHints] = useState(true)
   const [showAdvanced, setShowAdvanced] = useState(false)
-  const [modelExpanded, setModelExpanded] = useState(false)
 
   const modeTemplates = useMemo(() => {
     if (!promptLibrary) return []
@@ -54,9 +110,7 @@ export default function SpawnDialog({ task, defaultMode, send, onClose, promptLi
 
   const snippets = promptLibrary?.snippets ?? []
   const currentHint = promptLibrary?.modelHints?.find(h => h.provider === providerId)
-  const hasAdvancedContent = modeTemplates.length > 0 || snippets.length > 0 || !!currentHint
-  // Mode override counts as advanced indicator too
-  const advancedIndicator = promptId || snippetIds.length > 0 || !useModelHints || runMode !== defaultMode
+  const hasAdvanced = modeTemplates.length > 0 || snippets.length > 0 || !!currentHint
 
   const handleRunModeChange = (mode: RunMode) => {
     setRunMode(mode)
@@ -72,7 +126,6 @@ export default function SpawnDialog({ task, defaultMode, send, onClose, promptLi
   const handleModelSelect = (modelId: string, provider: ProviderId) => {
     setModel(modelId)
     setProviderId(provider)
-    setModelExpanded(false)
   }
 
   const handlePromptChange = (id: string) => {
@@ -135,22 +188,25 @@ export default function SpawnDialog({ task, defaultMode, send, onClose, promptLi
         {/* Body */}
         <div className="flex-1 overflow-y-auto px-5 py-5 space-y-5">
 
-          {/* Zone 1: Model — compact chip with expandable grid */}
-          <div className="space-y-2">
-            <p className="text-xs text-gray-600 mb-1.5 text-center">Model</p>
-            <div className="flex justify-center">
-              <button
-                onClick={() => setModelExpanded(prev => !prev)}
-                className={`flex items-center gap-1.5 px-4 py-1.5 text-xs rounded transition-colors ${PROVIDER_CHIP_ACTIVE[providerId] ?? PROVIDER_CHIP_ACTIVE.claude}`}
-              >
-                <span>{getProviderLabel(providerId)} {getModelLabel(model)}</span>
-                <ChevronDownIcon className={`w-3 h-3 transition-transform ${modelExpanded ? 'rotate-180' : ''}`} />
-              </button>
+          {/* Zone 1: WHAT — Mode + Provider-grouped Model chips */}
+          <div className="space-y-3">
+            <div>
+              <p className="text-xs text-gray-600 mb-1.5 text-center">Mode</p>
+              <div className="flex gap-1.5 flex-wrap justify-center">
+              {RUN_MODES.map(mode => (
+                <button
+                  key={mode.id}
+                  onClick={() => handleRunModeChange(mode.id)}
+                  className={`px-3 py-1.5 text-xs rounded transition-colors ${chip(runMode === mode.id)}`}
+                >
+                  {mode.label}
+                </button>
+              ))}
+              </div>
             </div>
-
-            {/* Expanded provider grid */}
-            {modelExpanded && (
-              <div className="space-y-2 mt-2">
+            <div>
+              <p className="text-xs text-gray-600 mb-1.5 text-center">Model</p>
+              <div className="space-y-2">
                 {PROVIDER_GROUPS.map(group => (
                   <div key={group.id} className="flex items-center gap-2 justify-center">
                     <span className={`text-xs w-12 text-right shrink-0 ${PROVIDER_LABEL_COLORS[group.id] ?? 'text-gray-500'}`}>{group.label}</span>
@@ -174,7 +230,7 @@ export default function SpawnDialog({ task, defaultMode, send, onClose, promptLi
                   </div>
                 ))}
               </div>
-            )}
+            </div>
           </div>
 
           {/* Zone 2: HOW — two labeled rows */}
@@ -227,105 +283,91 @@ export default function SpawnDialog({ task, defaultMode, send, onClose, promptLi
             </div>
           </div>
 
-          {/* Zone 3: Advanced — Mode switcher, Template, Snippets, Model hints */}
-          <div className="border-t border-gray-800 pt-3">
-            <button
-              onClick={() => setShowAdvanced(prev => !prev)}
-              className="flex items-center gap-1 text-xs text-gray-600 hover:text-gray-400 transition-colors mx-auto"
-            >
-              <ChevronDownIcon className={`w-3 h-3 transition-transform ${showAdvanced ? 'rotate-180' : ''}`} />
-              Advanced
-              {advancedIndicator && (
-                <span className="ml-1 text-blue-400">·</span>
-              )}
-            </button>
-
-            {showAdvanced && (
-              <div className="mt-3 space-y-4">
-                {/* Mode switcher (moved from top zone) */}
-                <div>
-                  <p className="text-xs text-gray-600 mb-1.5">Mode</p>
-                  <div className="flex gap-1.5 flex-wrap">
-                    {RUN_MODES.map(mode => (
-                      <button
-                        key={mode.id}
-                        onClick={() => handleRunModeChange(mode.id)}
-                        className={`px-3 py-1.5 text-xs rounded transition-colors ${chip(runMode === mode.id)}`}
-                      >
-                        {mode.label}
-                      </button>
-                    ))}
-                  </div>
-                </div>
-
-                {modeTemplates.length > 0 && (
-                  <div>
-                    <p className="text-xs text-gray-600 mb-1.5">Template</p>
-                    <select
-                      value={promptId ?? ''}
-                      onChange={e => handlePromptChange(e.target.value)}
-                      className="w-full bg-gray-800 border border-gray-700 rounded px-2.5 py-1.5 text-xs text-gray-300 outline-none focus:border-gray-600 transition-colors"
-                    >
-                      <option value="">Default (base)</option>
-                      {modeTemplates.map(t => (
-                        <option key={t.id} value={t.id}>
-                          {t.label}
-                          {t.layer === 'variant' ? ' ↳' : t.layer === 'task-specific' ? ' ★' : ''}
-                        </option>
-                      ))}
-                    </select>
-                    {promptId && (() => {
-                      const selected = modeTemplates.find(t => t.id === promptId)
-                      return selected?.description ? (
-                        <p className="text-xs text-gray-600 mt-1">{selected.description}</p>
-                      ) : null
-                    })()}
-                  </div>
+          {/* Zone 3: Advanced — Template + Snippets collapsed */}
+          {hasAdvanced && (
+            <div className="border-t border-gray-800 pt-3">
+              <button
+                onClick={() => setShowAdvanced(prev => !prev)}
+                className="flex items-center gap-1 text-xs text-gray-600 hover:text-gray-400 transition-colors mx-auto"
+              >
+                <ChevronDownIcon className={`w-3 h-3 transition-transform ${showAdvanced ? 'rotate-180' : ''}`} />
+                Advanced
+                {(promptId || snippetIds.length > 0 || !useModelHints) && (
+                  <span className="ml-1 text-blue-400">·</span>
                 )}
+              </button>
 
-                {snippets.length > 0 && (
-                  <div>
-                    <p className="text-xs text-gray-600 mb-1.5">Snippets</p>
-                    <div className="flex flex-wrap gap-1.5">
-                      {snippets.map(s => (
-                        <button
-                          key={s.id}
-                          onClick={() => toggleSnippet(s.id)}
-                          title={s.description}
-                          className={`px-2.5 py-1 text-xs rounded transition-colors ${
-                            snippetIds.includes(s.id)
-                              ? 'bg-gray-700 border border-gray-500 text-gray-200'
-                              : 'border border-gray-700 text-gray-500 hover:text-gray-300 hover:border-gray-600'
-                          }`}
-                        >
-                          {s.label}
-                        </button>
-                      ))}
-                    </div>
-                  </div>
-                )}
-
-                {currentHint && (
-                  <div className="flex items-center justify-between">
+              {showAdvanced && (
+                <div className="mt-3 space-y-4">
+                  {modeTemplates.length > 0 && (
                     <div>
-                      <p className="text-xs text-gray-400">{currentHint.label}</p>
-                      <p className="text-xs text-gray-600">{currentHint.description}</p>
+                      <p className="text-xs text-gray-600 mb-1.5">Template</p>
+                      <select
+                        value={promptId ?? ''}
+                        onChange={e => handlePromptChange(e.target.value)}
+                        className="w-full bg-gray-800 border border-gray-700 rounded px-2.5 py-1.5 text-xs text-gray-300 outline-none focus:border-gray-600 transition-colors"
+                      >
+                        <option value="">Default (base)</option>
+                        {modeTemplates.map(t => (
+                          <option key={t.id} value={t.id}>
+                            {t.label}
+                            {t.layer === 'variant' ? ' ↳' : t.layer === 'task-specific' ? ' ★' : ''}
+                          </option>
+                        ))}
+                      </select>
+                      {promptId && (() => {
+                        const selected = modeTemplates.find(t => t.id === promptId)
+                        return selected?.description ? (
+                          <p className="text-xs text-gray-600 mt-1">{selected.description}</p>
+                        ) : null
+                      })()}
                     </div>
-                    <button
-                      onClick={() => setUseModelHints(prev => !prev)}
-                      className={`px-2.5 py-1 text-xs rounded transition-colors ${
-                        useModelHints
-                          ? 'bg-gray-700 border border-gray-500 text-gray-200'
-                          : 'border border-gray-700 text-gray-500 hover:text-gray-300 hover:border-gray-600'
-                      }`}
-                    >
-                      {useModelHints ? 'On' : 'Off'}
-                    </button>
-                  </div>
-                )}
-              </div>
-            )}
-          </div>
+                  )}
+
+                  {snippets.length > 0 && (
+                    <div>
+                      <p className="text-xs text-gray-600 mb-1.5">Snippets</p>
+                      <div className="flex flex-wrap gap-1.5">
+                        {snippets.map(s => (
+                          <button
+                            key={s.id}
+                            onClick={() => toggleSnippet(s.id)}
+                            title={s.description}
+                            className={`px-2.5 py-1 text-xs rounded transition-colors ${
+                              snippetIds.includes(s.id)
+                                ? 'bg-gray-700 border border-gray-500 text-gray-200'
+                                : 'border border-gray-700 text-gray-500 hover:text-gray-300 hover:border-gray-600'
+                            }`}
+                          >
+                            {s.label}
+                          </button>
+                        ))}
+                      </div>
+                    </div>
+                  )}
+
+                  {currentHint && (
+                    <div className="flex items-center justify-between">
+                      <div>
+                        <p className="text-xs text-gray-400">{currentHint.label}</p>
+                        <p className="text-xs text-gray-600">{currentHint.description}</p>
+                      </div>
+                      <button
+                        onClick={() => setUseModelHints(prev => !prev)}
+                        className={`px-2.5 py-1 text-xs rounded transition-colors ${
+                          useModelHints
+                            ? 'bg-gray-700 border border-gray-500 text-gray-200'
+                            : 'border border-gray-700 text-gray-500 hover:text-gray-300 hover:border-gray-600'
+                        }`}
+                      >
+                        {useModelHints ? 'On' : 'Off'}
+                      </button>
+                    </div>
+                  )}
+                </div>
+              )}
+            </div>
+          )}
 
           {/* Instructions — always visible */}
           <div className="border-t border-gray-800 pt-4">

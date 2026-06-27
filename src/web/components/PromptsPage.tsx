@@ -9,6 +9,27 @@ const MODE_CHIPS: { mode: RunMode; label: string }[] = [
   { mode: 'fix', label: 'Fix' },
 ]
 
+// Canonical model options, grouped by provider (mirrors SpawnDialog's PROVIDER_GROUPS)
+const MODEL_GROUPS: { label: string; models: { id: string; label: string }[] }[] = [
+  { label: 'Claude', models: [
+    { id: 'haiku', label: 'Haiku' },
+    { id: 'sonnet', label: 'Sonnet' },
+    { id: 'opus', label: 'Opus' },
+  ] },
+  { label: 'Gemini', models: [
+    { id: 'gemini-2.5-flash', label: 'Flash' },
+    { id: 'gemini-2.5-pro', label: 'Pro' },
+  ] },
+  { label: 'Codex', models: [
+    { id: 'o4-mini', label: 'o4-mini' },
+    { id: 'o3', label: 'o3' },
+    { id: 'gpt-4.1', label: 'GPT-4.1' },
+  ] },
+]
+
+// Permission profiles (one .md each in permissions/)
+const PROFILE_OPTIONS = ['plan', 'read-only', 'standard', 'full-access']
+
 interface PromptsPageProps {
   templates: PromptTemplateContent[]
   requestTemplates: () => void
@@ -19,6 +40,13 @@ export default function PromptsPage({ templates, requestTemplates, send }: Promp
   const [selectedMode, setSelectedMode] = useState<RunMode>('plan')
   const [editContent, setEditContent] = useState('')
   const [loadedContent, setLoadedContent] = useState('')
+  // Per-stage defaults (model/time/profile) — editable, with loaded baselines for dirty-tracking
+  const [editModel, setEditModel] = useState('')
+  const [loadedModel, setLoadedModel] = useState('')
+  const [editTime, setEditTime] = useState(0)
+  const [loadedTime, setLoadedTime] = useState(0)
+  const [editProfile, setEditProfile] = useState('')
+  const [loadedProfile, setLoadedProfile] = useState('')
   const [toast, setToast] = useState<string | null>(null)
   const [pendingModeSwitch, setPendingModeSwitch] = useState<RunMode | null>(null)
   const textareaRef = useRef<HTMLTextAreaElement>(null)
@@ -28,16 +56,25 @@ export default function PromptsPage({ templates, requestTemplates, send }: Promp
     requestTemplates()
   }, [requestTemplates])
 
-  // Sync editor when templates arrive or selected mode changes
+  // Sync editor + stage defaults when templates arrive or selected mode changes
   const currentTemplate = templates.find(t => t.mode === selectedMode)
   useEffect(() => {
     if (currentTemplate) {
       setEditContent(currentTemplate.content)
       setLoadedContent(currentTemplate.content)
+      setEditModel(currentTemplate.defaultModel)
+      setLoadedModel(currentTemplate.defaultModel)
+      setEditTime(currentTemplate.defaultTime)
+      setLoadedTime(currentTemplate.defaultTime)
+      setEditProfile(currentTemplate.defaultProfile)
+      setLoadedProfile(currentTemplate.defaultProfile)
     }
-  }, [currentTemplate?.content, selectedMode])
+  }, [currentTemplate?.content, currentTemplate?.defaultModel, currentTemplate?.defaultTime, currentTemplate?.defaultProfile, selectedMode])
 
   const isDirty = editContent !== loadedContent
+    || editModel !== loadedModel
+    || editTime !== loadedTime
+    || editProfile !== loadedProfile
 
   function switchMode(mode: RunMode) {
     if (isDirty) {
@@ -59,8 +96,11 @@ export default function PromptsPage({ templates, requestTemplates, send }: Promp
   }
 
   function handleSave() {
-    send({ type: 'save_prompt_template', mode: selectedMode, content: editContent })
+    send({ type: 'save_prompt_template', mode: selectedMode, content: editContent, model: editModel, time: editTime, profile: editProfile })
     setLoadedContent(editContent)
+    setLoadedModel(editModel)
+    setLoadedTime(editTime)
+    setLoadedProfile(editProfile)
     showToast('Saved')
   }
 
@@ -105,12 +145,53 @@ export default function PromptsPage({ templates, requestTemplates, send }: Promp
         })}
       </div>
 
-      {/* Template metadata bar */}
+      {/* Template defaults bar — editable per stage (model / time / profile) */}
       {currentTemplate && (
-        <div className="flex items-center justify-center gap-4 mb-4 text-xs text-gray-500">
-          <span>Model: <span className="text-gray-400">{currentTemplate.defaultModel}</span></span>
-          <span>Time: <span className="text-gray-400">{currentTemplate.defaultTime}m</span></span>
-          <span>Profile: <span className="text-gray-400">{currentTemplate.defaultProfile}</span></span>
+        <div className="flex flex-wrap items-center justify-center gap-x-4 gap-y-2 mb-4 text-xs text-gray-500">
+          <label className="flex items-center gap-1.5">
+            Model:
+            <select
+              value={editModel}
+              onChange={e => setEditModel(e.target.value)}
+              className="bg-gray-800 border border-gray-700 rounded px-2 py-1 text-gray-200 focus:outline-none focus:border-gray-500 transition-colors"
+            >
+              {MODEL_GROUPS.map(g => (
+                <optgroup key={g.label} label={g.label}>
+                  {g.models.map(m => <option key={m.id} value={m.id}>{m.label}</option>)}
+                </optgroup>
+              ))}
+              {/* Preserve an unrecognized saved model so the value never silently blanks */}
+              {!MODEL_GROUPS.some(g => g.models.some(m => m.id === editModel)) && editModel && (
+                <option value={editModel}>{editModel}</option>
+              )}
+            </select>
+          </label>
+          <label className="flex items-center gap-1.5">
+            Time:
+            <input
+              type="number"
+              min={5}
+              max={180}
+              step={5}
+              value={editTime}
+              onChange={e => setEditTime(Math.max(5, Math.min(180, Number(e.target.value) || 5)))}
+              className="w-16 bg-gray-800 border border-gray-700 rounded px-2 py-1 text-gray-200 focus:outline-none focus:border-gray-500 transition-colors"
+            />
+            m
+          </label>
+          <label className="flex items-center gap-1.5">
+            Profile:
+            <select
+              value={editProfile}
+              onChange={e => setEditProfile(e.target.value)}
+              className="bg-gray-800 border border-gray-700 rounded px-2 py-1 text-gray-200 focus:outline-none focus:border-gray-500 transition-colors"
+            >
+              {PROFILE_OPTIONS.map(p => <option key={p} value={p}>{p}</option>)}
+              {!PROFILE_OPTIONS.includes(editProfile) && editProfile && (
+                <option value={editProfile}>{editProfile}</option>
+              )}
+            </select>
+          </label>
           {currentTemplate.hasCustomOverride && (
             <span className="text-blue-400">Custom</span>
           )}

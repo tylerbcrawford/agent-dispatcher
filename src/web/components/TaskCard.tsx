@@ -1,33 +1,30 @@
 // src/web/components/TaskCard.tsx
 import { useState } from 'react'
-import type { Task, AgentSession, TaskStatus, ClientMessage, RunMode } from '@shared/types'
-import type { ModeDefaults } from '../hooks/usePreferences'
-import ConversationThread from './ConversationThread'
-import ElapsedTime from './ElapsedTime'
+import type { Task, AgentSession, TaskStatus, ClientMessage, DiffData, ProjectConfig } from '@shared/types'
 import StatusIndicator from './StatusIndicator'
-import { CheckIcon, CopyIcon, EditIcon, GearIcon, PlayIcon, TrashIcon } from './icons'
+import { CheckIcon, CopyIcon, EditIcon, PlayIcon, RestoreIcon, TrashIcon } from './icons'
+import AgentControls from './AgentControls'
 
 interface Props {
   task: Task
-  activeAgent: AgentSession | null
+  agent: AgentSession | null
   onSpawn: (mode: 'plan' | 'implement') => void
   onEdit: (task: Task) => void
-  onDelete: (taskId: number) => void
-  onMarkDone: (taskId: number) => void
+  onDelete: () => void
+  onMarkDone: () => void
+  onRestore: () => void
   selectionMode?: boolean
   selected?: boolean
   onToggleSelect?: () => void
   projectLabel?: string
-  onNavigateQueue?: () => void
   onViewPlan?: () => void
   expanded: boolean
   onToggle: () => void
-  borderClass?: string
-  leftBorderClass?: string
   send: (msg: ClientMessage) => void
-  onViewTerminal?: (agentId: string) => void
-  onNavigateAgents?: () => void
-  preferences: Record<Exclude<RunMode, 'custom'>, ModeDefaults>
+  onViewTerminal: (agentId: string) => void
+  diffs: Record<string, DiffData>
+  requestDiff: (agentId: string) => void
+  projects: ProjectConfig[]
 }
 
 export const STATUS_BADGES: Record<TaskStatus, { label: string; className: string; color: string; pulse?: boolean; shape?: 'circle' | 'diamond' | 'triangle' }> = {
@@ -41,31 +38,16 @@ export const STATUS_BADGES: Record<TaskStatus, { label: string; className: strin
   'manual': { label: 'Manual', className: 'bg-red-900/40 text-red-300', color: 'text-red-400' },
 }
 
-export default function TaskCard({ task, activeAgent, onSpawn, onEdit, onDelete, onMarkDone, selectionMode, selected, onToggleSelect, projectLabel, onNavigateQueue, onViewPlan, expanded, onToggle, borderClass = 'border-gray-700', leftBorderClass, send, onViewTerminal, onNavigateAgents, preferences }: Props) {
+export default function TaskCard({ task, agent, onSpawn, onEdit, onDelete, onMarkDone, onRestore, selectionMode, selected, onToggleSelect, projectLabel, onViewPlan, expanded, onToggle, send, onViewTerminal, diffs, requestDiff, projects }: Props) {
   const [confirmDelete, setConfirmDelete] = useState(false)
   const [copied, setCopied] = useState(false)
   const [descExpanded, setDescExpanded] = useState(false)
   const [showActions, setShowActions] = useState(false)
 
-  function handleQuickLaunch(mode: 'plan' | 'implement') {
-    const defaults = preferences[mode]
-    send({
-      type: 'spawn_agent',
-      taskId: task.id,
-      projectId: task.projectId,
-      runMode: mode,
-      executionMode: 'single',
-      model: defaults.model,
-      providerId: defaults.providerId,
-      profile: defaults.profile,
-      timeLimit: mode === 'plan' ? 30 : 60,
-      gitBranch: mode !== 'plan',
-      useModelHints: undefined,
-    })
-  }
+  const agentIsActive = !!agent && ['running', 'waiting', 'stalled'].includes(agent.state)
 
   return (
-    <div className={`group bg-gray-900 border rounded-lg overflow-hidden transition-colors ${leftBorderClass ? `border-l-[3px] ${leftBorderClass}` : ''} ${selected ? 'border-red-500/50 bg-red-950/10' : borderClass}`}>
+    <div className={`group bg-gray-900 border rounded-lg overflow-hidden transition-colors ${selected ? 'border-red-500/50 bg-red-950/10' : 'border-gray-700'}`}>
       {/* Collapsed header — always visible */}
       <div
         className="flex items-center gap-3 px-4 py-3 cursor-pointer"
@@ -80,14 +62,12 @@ export default function TaskCard({ task, activeAgent, onSpawn, onEdit, onDelete,
             className="accent-red-500 w-4 h-4 cursor-pointer flex-shrink-0"
           />
         )}
-        <span className="text-base font-medium truncate min-w-0 flex-1 text-gray-300">{task.name}</span>
-        {(task.status === 'plan-review' || task.status === 'in-review') && (
-          <span className="text-[10px] px-1.5 py-0.5 rounded bg-purple-900/40 text-purple-300 flex-shrink-0">
-            {task.status === 'plan-review' ? 'Plan' : 'Verify'}
-          </span>
+        {task.score != null && (
+          <span className="text-[10px] font-mono text-gray-500 flex-shrink-0">{task.score}</span>
         )}
+        <span className="font-medium truncate min-w-0 flex-1 text-gray-200">{task.name}</span>
         {/* Pulsing blue dot when agent is active and card is collapsed */}
-        {!expanded && activeAgent && (activeAgent.state === 'running' || activeAgent.state === 'waiting') && (
+        {!expanded && agent && (agent.state === 'running' || agent.state === 'waiting') && (
           <StatusIndicator color="text-blue-400" pulse />
         )}
       </div>
@@ -96,68 +76,39 @@ export default function TaskCard({ task, activeAgent, onSpawn, onEdit, onDelete,
       <div className={`grid transition-[grid-template-rows] duration-200 ease-out ${expanded ? 'grid-rows-[1fr]' : 'grid-rows-[0fr]'}`}>
         <div className="overflow-hidden">
           <div className="px-5 pb-4">
-            {/* Meta chips — small, muted, no pipe separators */}
-            <div className="flex items-center gap-2 mt-1 text-xs text-gray-500">
-              {projectLabel && (
-                <span className="bg-gray-800 text-gray-500 px-1.5 py-0.5 rounded">{projectLabel}</span>
-              )}
-              <span>{task.priority}</span>
-              <span>{task.timeEstimate}</span>
-              {task.category && (
-                <span>{task.category}</span>
-              )}
-            </div>
-
-            {/* Action buttons — own dedicated line */}
-            {(task.status === 'ready' || task.status === 'needs-planning' || task.status === 'plan-review' || task.status === 'in-review') && !activeAgent && (
-              <div className="flex items-center gap-2 mt-3">
-                {task.status === 'ready' && (
-                  <>
-                    <button
-                      onClick={() => handleQuickLaunch('implement')}
-                      className="flex items-center gap-1.5 px-3 py-1.5 rounded-md bg-green-900/30 border border-green-500/40 text-green-400 hover:bg-green-900/50 hover:border-green-500/70 text-xs transition-colors"
-                    >
-                      <PlayIcon />
-                      <span>Launch</span>
-                    </button>
-                    <button
-                      onClick={() => onSpawn('implement')}
-                      className="text-gray-600 hover:text-gray-400 transition-colors p-1"
-                      title="Customize launch"
-                    >
-                      <GearIcon />
-                    </button>
-                  </>
+            {/* Meta row — meta left, CTA right */}
+            <div className="flex items-center justify-between mt-1 text-sm text-gray-400">
+              <div className="flex items-center gap-3 flex-wrap">
+                {projectLabel && (
+                  <span className="bg-gray-800 text-gray-500 px-1.5 py-0.5 rounded">{projectLabel}</span>
                 )}
-                {task.status === 'needs-planning' && (
-                  <>
-                    <button
-                      onClick={() => handleQuickLaunch('plan')}
-                      className="flex items-center gap-1.5 px-3 py-1.5 rounded-md bg-yellow-900/30 border border-yellow-500/40 text-yellow-400 hover:bg-yellow-900/50 hover:border-yellow-500/70 text-xs transition-colors"
-                    >
-                      <PlayIcon />
-                      <span>Plan</span>
-                    </button>
-                    <button
-                      onClick={() => onSpawn('plan')}
-                      className="text-gray-600 hover:text-gray-400 transition-colors p-1"
-                      title="Customize plan"
-                    >
-                      <GearIcon />
-                    </button>
-                  </>
-                )}
-                {(task.status === 'plan-review' || task.status === 'in-review') && onNavigateQueue && (
-                  <button
-                    onClick={(e) => { e.stopPropagation(); onNavigateQueue() }}
-                    className="flex items-center gap-1.5 px-3 py-1.5 rounded-md bg-purple-900/30 border border-purple-500/40 text-purple-400 hover:bg-purple-900/50 hover:border-purple-500/70 text-xs transition-colors"
-                  >
-                    <PlayIcon />
-                    <span>Review</span>
-                  </button>
+                <span>{task.priority}</span>
+                <span>{task.timeEstimate}</span>
+                {task.category && (
+                  <span>{task.category}</span>
                 )}
               </div>
-            )}
+
+              {/* Inline CTA */}
+              {(task.status === 'ready' && !agentIsActive) && (
+                <button
+                  onClick={(e) => { e.stopPropagation(); onSpawn('implement') }}
+                  className="flex items-center gap-1.5 px-3 py-1 rounded-full border border-blue-500/40 text-blue-400 hover:bg-blue-900/20 hover:border-blue-500/70 text-xs transition-colors"
+                >
+                  <PlayIcon />
+                  <span>Launch</span>
+                </button>
+              )}
+              {task.status === 'needs-planning' && (
+                <button
+                  onClick={(e) => { e.stopPropagation(); onSpawn('plan') }}
+                  className="flex items-center gap-1.5 px-3 py-1 rounded-full border border-blue-500/40 text-blue-400 hover:bg-blue-900/20 hover:border-blue-500/70 text-xs transition-colors"
+                >
+                  <PlayIcon />
+                  <span>Plan</span>
+                </button>
+              )}
+            </div>
 
             {/* Description — truncated to 2 lines, click to expand */}
             {task.description && (
@@ -171,10 +122,10 @@ export default function TaskCard({ task, activeAgent, onSpawn, onEdit, onDelete,
 
             {/* View plan link */}
             {onViewPlan && (
-              <div className="mt-2">
+              <div className="flex mt-2">
                 <button
                   onClick={onViewPlan}
-                  className="text-xs text-blue-400 hover:text-blue-300 transition-colors"
+                  className="text-xs text-gray-500 hover:text-gray-300 transition-colors"
                 >
                   View plan →
                 </button>
@@ -193,92 +144,21 @@ export default function TaskCard({ task, activeAgent, onSpawn, onEdit, onDelete,
             )}
 
             {/* Inline agent controls */}
-            {activeAgent && (
-              <div className="mt-3 bg-blue-900/20 border border-blue-700/30 rounded px-3 py-2 space-y-2">
-                {/* Status row */}
-                <div className="flex items-center gap-2 text-xs">
-                  <StatusIndicator
-                    color={activeAgent.state === 'running' ? 'text-green-400' : activeAgent.state === 'completed' ? 'text-green-400' : 'text-yellow-400'}
-                    pulse={activeAgent.state === 'running'}
-                  />
-                  <span className="text-blue-400 truncate flex-1">
-                    {activeAgent.displayName}
-                  </span>
-                  <span className="text-gray-500">
-                    <ElapsedTime
-                      startedAt={activeAgent.startedAt}
-                      timeSpent={activeAgent.timeSpent}
-                      timeLimit={activeAgent.timeLimit}
-                      isRunning={activeAgent.state === 'running'}
-                    />
-                  </span>
-                </div>
-
-                {/* Conversation history (compact, last 3 entries) */}
-                {activeAgent.conversationHistory.length > 0 && (
-                  <ConversationThread
-                    history={activeAgent.conversationHistory.slice(-3)}
-                    onSend={(text) => send({ type: 'agent_input', agentId: activeAgent.id, input: text })}
-                    showInput={activeAgent.state === 'waiting'}
-                    compact
-                  />
-                )}
-
-                {/* Contextual action + links */}
-                <div className="flex items-center gap-2 text-xs">
-                  {/* Contextual action button */}
-                  {activeAgent.state === 'running' && (
-                    <button
-                      onClick={() => send({ type: 'stop_agent', agentId: activeAgent.id })}
-                      className="bg-red-900/60 hover:bg-red-800/60 text-red-300 px-3 py-1 rounded transition-colors"
-                    >
-                      Stop
-                    </button>
-                  )}
-                  {activeAgent.state === 'stalled' && (
-                    <button
-                      onClick={() => send({ type: 'nudge_agent', agentId: activeAgent.id, message: 'Continue working on the task.' })}
-                      className="bg-orange-900/60 hover:bg-orange-800/60 text-orange-300 px-3 py-1 rounded transition-colors"
-                    >
-                      Nudge
-                    </button>
-                  )}
-                  {activeAgent.state === 'completed' && (
-                    <button
-                      onClick={() => onMarkDone(task.id)}
-                      className="bg-green-900/60 hover:bg-green-800/60 text-green-300 px-3 py-1 rounded transition-colors"
-                    >
-                      Mark Done
-                    </button>
-                  )}
-
-                  <div className="flex-1" />
-
-                  {/* Links */}
-                  {onViewTerminal && ['running', 'waiting', 'stalled'].includes(activeAgent.state) && (
-                    <button
-                      onClick={() => onViewTerminal(activeAgent.id)}
-                      className="text-gray-500 hover:text-gray-300 transition-colors"
-                    >
-                      Terminal
-                    </button>
-                  )}
-                  {onNavigateAgents && (
-                    <button
-                      onClick={onNavigateAgents}
-                      className="text-gray-500 hover:text-gray-300 transition-colors"
-                    >
-                      Details
-                    </button>
-                  )}
-                </div>
-              </div>
+            {agent && (
+              <AgentControls
+                agent={agent}
+                projects={projects}
+                send={send}
+                onViewTerminal={onViewTerminal}
+                diffs={diffs}
+                requestDiff={requestDiff}
+              />
             )}
 
             {/* Status messages */}
             {task.status === 'plan-review' && (
               <div className="mt-3">
-                <span className="text-xs text-purple-400">Awaiting review in queue</span>
+                <span className="text-xs text-gray-500">Awaiting review in queue</span>
               </div>
             )}
             {task.status === 'blocked' && task.depends.length > 0 && (
@@ -291,48 +171,58 @@ export default function TaskCard({ task, activeAgent, onSpawn, onEdit, onDelete,
 
             {/* Action buttons — hidden behind overflow toggle */}
             {!selectionMode && (
-              <div className="mt-3">
+              <div className="flex mt-3">
                 {showActions ? (
                   <div className="flex items-center gap-3">
                     {task.status !== 'done' && (
                       <button
-                        onClick={() => onMarkDone(task.id)}
-                        className="text-gray-500 hover:text-green-400 transition-colors p-1"
+                        onClick={(e) => { e.stopPropagation(); onMarkDone() }}
+                        className="text-gray-500 hover:text-gray-300 transition-all p-1"
                         title="Mark done"
                       >
                         <CheckIcon />
                       </button>
                     )}
+                    {task.status === 'done' && (
+                      <button
+                        onClick={(e) => { e.stopPropagation(); onRestore() }}
+                        className="text-gray-500 hover:text-gray-300 transition-all p-1"
+                        title="Restore to ready"
+                      >
+                        <RestoreIcon />
+                      </button>
+                    )}
                     <button
-                      onClick={() => {
+                      onClick={(e) => {
+                        e.stopPropagation()
                         navigator.clipboard.writeText(task.description || task.name)
                         setCopied(true)
                         setTimeout(() => setCopied(false), 1500)
                       }}
-                      className="text-gray-500 hover:text-blue-400 transition-colors p-1"
+                      className="text-gray-500 hover:text-blue-400 transition-all p-1"
                       title={copied ? 'Copied!' : 'Copy task'}
                     >
                       {copied ? <span className="text-xs text-blue-400">Copied!</span> : <CopyIcon />}
                     </button>
                     <button
-                      onClick={() => onEdit(task)}
-                      className="text-gray-500 hover:text-gray-300 transition-colors p-1"
+                      onClick={(e) => { e.stopPropagation(); onEdit(task) }}
+                      className="text-gray-500 hover:text-gray-300 transition-all p-1"
                       title="Edit task"
                     >
                       <EditIcon />
                     </button>
-                    {!activeAgent && (
+                    {!agent && (
                       confirmDelete ? (
                         <span className="flex gap-1 items-center">
                           <span className="text-xs text-gray-400">Delete?</span>
                           <button
-                            onClick={() => { onDelete(task.id); setConfirmDelete(false) }}
+                            onClick={(e) => { e.stopPropagation(); onDelete(); setConfirmDelete(false) }}
                             className="text-xs text-red-400 hover:text-red-300 px-1 py-0.5 transition-colors font-medium"
                           >
                             Yes
                           </button>
                           <button
-                            onClick={() => setConfirmDelete(false)}
+                            onClick={(e) => { e.stopPropagation(); setConfirmDelete(false) }}
                             className="text-xs text-gray-500 hover:text-gray-300 px-1 py-0.5 transition-colors"
                           >
                             No
@@ -340,8 +230,8 @@ export default function TaskCard({ task, activeAgent, onSpawn, onEdit, onDelete,
                         </span>
                       ) : (
                         <button
-                          onClick={() => setConfirmDelete(true)}
-                          className="text-gray-500 hover:text-red-400 transition-colors p-1"
+                          onClick={(e) => { e.stopPropagation(); setConfirmDelete(true) }}
+                          className="text-gray-500 hover:text-red-400 transition-all p-1"
                           title="Delete task"
                         >
                           <TrashIcon />
@@ -351,7 +241,7 @@ export default function TaskCard({ task, activeAgent, onSpawn, onEdit, onDelete,
                   </div>
                 ) : (
                   <button
-                    onClick={() => setShowActions(true)}
+                    onClick={(e) => { e.stopPropagation(); setShowActions(true) }}
                     className="text-gray-600 hover:text-gray-400 text-xs transition-colors"
                   >
                     ···

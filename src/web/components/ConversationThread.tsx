@@ -59,7 +59,7 @@ export default function ConversationThread({ history, onSend, showInput, compact
           {history.map((entry, i) => {
             const isLastAgent = showInput && entry.role === 'agent' && i === history.length - 1
             const borderColor = isLastAgent
-              ? 'border-yellow-500/30'
+              ? 'border-gray-700'
               : entry.role === 'agent'
                 ? 'border-gray-600'
                 : 'border-blue-500/30'
@@ -94,7 +94,7 @@ export default function ConversationThread({ history, onSend, showInput, compact
           <button
             onClick={handleSend}
             disabled={!input.trim()}
-            className="text-xs bg-yellow-600 hover:bg-yellow-500 disabled:opacity-40 disabled:cursor-not-allowed text-white px-3 py-1.5 rounded transition-colors self-end"
+            className="text-xs bg-blue-600 hover:bg-blue-500 disabled:opacity-40 disabled:cursor-not-allowed text-white px-3 py-1.5 rounded transition-colors self-end"
           >
             Send
           </button>

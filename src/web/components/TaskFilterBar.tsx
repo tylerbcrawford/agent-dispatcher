@@ -146,7 +146,7 @@ export default function TaskFilterBar({ tasks, filters, onChange, onReset, resul
 
   return (
     <div ref={barRef} className="mb-4 space-y-2">
-      {/* Top row: active filter count + reset (toggle button is in the header) */}
+      {/* Top row: active filter count + reset (toggle button is in the board toolbar) */}
       {(active || filtersExpanded) && (
         <div className="flex items-center justify-center gap-2">
           {activeCount > 0 && (

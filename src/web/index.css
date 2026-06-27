@@ -69,6 +69,15 @@
   --color-purple-600: #7C3AED;
   --color-purple-900: #2E1065;
   --color-purple-950: #1A0533;
+
+  /* ── Intent-named token aliases ─────────────── */
+  --color-bg-elevated: #141414;     /* gray-900 — elevated surface */
+  --color-bg-subtle: #1C1C1C;       /* gray-800 */
+  --color-text-secondary: #A0A0A0;  /* gray-400 */
+  --color-text-tertiary: #666666;   /* gray-500 */
+  --color-border-default: #2A2A2A;  /* gray-700 */
+  --color-border-strong: #444444;   /* gray-600 */
+  --color-accent: #00A9E0;          /* blue-500 — single accent */
 }
 
 @layer base {
@@ -79,10 +88,4 @@
 
 @layer utilities {
   .pb-safe { padding-bottom: env(safe-area-inset-bottom, 0px); }
-}
-
-/* Override highlight.js background to be transparent inside our styled <pre> */
-pre code.hljs {
-  background: transparent;
-  padding: 0;
 }
