@@ -8,3 +8,4 @@ sessions/
 .worktrees/
 test-results/
 e2e/screenshots/
+.superpowers/

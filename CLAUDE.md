@@ -5,7 +5,7 @@ Web dashboard that orchestrates headless AI coding agents against project tasks.
 ## Quick Reference
 - **Frontend:** React 19 + Vite + Tailwind CSS + xterm.js
 - **Backend:** Express (Docker) + node-pty runner (host systemd)
-- **IPC:** Unix socket at /tmp/agent-dispatcher.sock
+- **IPC:** Unix socket at /run/agent-dispatcher/dispatcher.sock
 - **Tests:** Vitest — run with `npm test`
 - **Dev:** `npm run dev:web` (frontend) + `npm run dev:runner` (host runner)
 
@@ -34,3 +34,9 @@ Web dashboard that orchestrates headless AI coding agents against project tasks.
 - Frontmatter fields: id, mode, label, description, default_profile, default_time, default_model, tags
 - Variants extend bases via `extends: <base-id>` and `${basePrompt}` placeholder
 - Snippets are toggleable additions appended after the main prompt
+
+## Deployment
+
+`./deploy.sh` auto-detects what changed (runner/frontend/all) from `git diff` and runs the appropriate build and restart steps. You can also target explicitly: `npm run deploy:runner`, `npm run deploy:frontend`, or `npm run deploy:all`.
+
+After any runner change, restart **both** the runner service and the web container. The web container proxies WebSocket to the runner over a Unix socket and holds the socket connection open — restarting the runner creates a new socket inode, which leaves the web container pointing at a dead file descriptor until it is also restarted.

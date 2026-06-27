@@ -3,7 +3,7 @@ import { test, expect, type Page } from '@playwright/test'
 // Helper: switch to the Playwright Test project via the project selector dropdown
 async function selectPlaywrightProject(page: Page) {
   // The project button shows the current project name
-  const projectBtn = page.locator('header button', { hasText: /(Media Server|Playwright Test|Example|Subgeneratorr)/ }).first()
+  const projectBtn = page.locator('header button', { hasText: /(Example|Demo|Playwright Test)/ }).first()
   const btnText = await projectBtn.textContent()
 
   if (btnText?.includes('Playwright Test')) return // Already selected

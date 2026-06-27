@@ -1,5 +1,5 @@
 ---
-project: my-webapp
+project: example
 description: Example project — delete or replace this file with your own
 default-cwd: /home/you/projects/my-webapp
 claude-md: /home/you/projects/my-webapp/CLAUDE.md

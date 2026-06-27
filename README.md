@@ -24,7 +24,11 @@ Agent Dispatcher solves this by providing a task board (parsed from markdown tod
 - Markdown-based task board parsed from todo files with YAML frontmatter
 - Tasks grouped by effort bucket (Running, Needs Review, Ready, Needs Planning, Blocked)
 - Priority sorting, category filtering, search, and bulk operations
-- Create, edit, and delete tasks from the UI — writes back to markdown
+- Inline task editing — edit name, priority, status, time, and score from the UI; changes write back surgically to the source markdown without touching prose or task logs
+- Task scoring: numeric 0-100 scores computed from project weight, priority, time estimate, and urgency; scores persist in the todo file and update on a rescore pass
+- Project groups: organize projects into named, color-coded groups with drag-to-reorder; group membership and display order sync to the runner
+- Priorities page: drag-to-rank project editor that auto-computes weights from rank position and feeds the scoring formula
+- Auto-registration of new todo files: a chokidar watcher monitors the vault's projects directory (depth 3) and registers new projects automatically — no manual `projects.json` editing needed
 
 **Agent Orchestration**
 - Spawn agents with configurable provider, model, run mode, and permission profile
@@ -32,11 +36,14 @@ Agent Dispatcher solves this by providing a task board (parsed from markdown tod
 - Run modes: Plan, Implement, Audit, Fix, Custom
 - Time limits with stall detection (no output for N minutes)
 - Git branch isolation per agent run
+- Per-agent USD budget cap (`AC_MAX_BUDGET_USD`, default `$2`) — enforced at spawn time
+- Stop/Kill controls: stop any running or waiting agent; kill stalled agents; nudge agents that have gone quiet
+- Ralph autonomous loop: re-spawns the agent after each exit until `[COMPLETED]` is emitted or human input is needed
 
 **Live Monitoring**
 - Real-time terminal output via xterm.js
 - Agent state tracking: running, waiting, stalled, completed, errored
-- Signal detection: `[VERIFIED]`, `[PLAN_READY]`, `[NEEDS_HELP]`, `[PARTIAL]`
+- Signal detection: `[COMPLETED]`, `[VERIFIED]` (takes priority), `[PLAN_READY]`, `[NEEDS_HELP: reason]` (routes to Human Work Queue), `[PARTIAL: summary]`; separate heuristic question detection also routes to the Human Work Queue
 - Inline conversation history on task cards
 
 **Human-in-the-Loop**
@@ -81,7 +88,7 @@ The system is split into three layers:
 
 TypeScript (ESM) | React 19 | Vite 7 | Tailwind CSS 4 | Express 5 | ws | node-pty | xterm.js | react-markdown | Vitest
 
-~9,850 LOC | 170 tests | 21 React components | 3 providers
+~11,800 lines of TypeScript | 202 tests | 25 React components | 3 providers | Node 20+
 
 ## Quick Start
 
@@ -152,12 +159,16 @@ src/
     spawner.ts     # Agent lifecycle management
     parser.ts      # Todo file parser
     serializer.ts  # Todo file writer
+    task-editor.ts # Surgical non-lossy task field updates
     providers.ts   # CLI command builders (Claude/Gemini/Codex)
+    watcher.ts     # Chokidar filesystem watcher (auto-registration)
+    ralph.ts       # Autonomous loop controller
+    scoring/       # Task score calculator and scoring pass runner
     prompt-library.ts
   server/          # Express WebSocket proxy (Docker)
   shared/          # TypeScript types
   web/             # React frontend
-    components/    # 21 React components
+    components/    # 25 React components
     hooks/         # Custom hooks (WebSocket, preferences)
     lib/           # Shared utilities
 prompts/           # Prompt library (markdown templates)
@@ -168,7 +179,6 @@ permissions/       # Permission profiles
 
 - Inline task execution (run agents without leaving the task board)
 - LLM Council mode (multi-agent consensus for critical decisions)
-- Discord notifications for agent state changes
 - Swipe/tab navigation for mobile
 - Permission learning from approved commands
 

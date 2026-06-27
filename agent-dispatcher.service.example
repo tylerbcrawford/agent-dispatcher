@@ -6,6 +6,7 @@ After=network.target
 Type=simple
 User=<YOUR_USER>
 WorkingDirectory=<YOUR_PATH>/agent-dispatcher
+RuntimeDirectory=agent-dispatcher
 ExecStart=/usr/bin/node --import tsx src/runner/index.ts
 Restart=on-failure
 RestartSec=5
