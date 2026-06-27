@@ -4,9 +4,9 @@ A web dashboard for orchestrating headless AI coding agents. Spawn, monitor, and
 
 Built as a personal tool for managing concurrent AI agents across multiple projects — designed for developers who run headless CLI agents and need visibility into what they're doing.
 
-![Task Board](docs/screenshots/task-board.png)
-![Spawn Dialog](docs/screenshots/spawn-dialog.png)
-![Agent Panel](docs/screenshots/agent-panel.png)
+![Task board — markdown todo files parsed into a bucketed board](docs/screenshots/task-board.png)
+![Launch Agent — spawn dialog with provider, model, run mode, and permission profile](docs/screenshots/spawn-dialog.png)
+![Composable prompt library — editable base templates per run mode](docs/screenshots/prompt-library.png)
 
 ## Why I Built This
 
