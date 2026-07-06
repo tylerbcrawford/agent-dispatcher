@@ -267,7 +267,7 @@ export default function TaskBoard({ tasks, agents, queue, send, currentProject, 
                 <span className="ml-1 text-gray-500">({bucketTasks.length})</span>
               </button>
               {doneExpanded && (
-                <div className="grid gap-2">
+                <div className="grid gap-2 items-start lg:grid-cols-2 2xl:grid-cols-3">
                   {bucketTasks.map(t => renderTaskCard(t))}
                 </div>
               )}
@@ -282,7 +282,7 @@ export default function TaskBoard({ tasks, agents, queue, send, currentProject, 
               {label}
               <span className="ml-1 text-gray-500">({bucketTasks.length})</span>
             </div>
-            <div className="grid gap-2">
+            <div className="grid gap-2 items-start lg:grid-cols-2 2xl:grid-cols-3">
               {bucketTasks.map(t => renderTaskCard(t))}
             </div>
           </div>

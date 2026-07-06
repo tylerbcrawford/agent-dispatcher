@@ -220,7 +220,7 @@ export default function App() {
       {/* Main content */}
       <div className="flex-1 flex flex-col overflow-hidden">
         <main className={`flex-1 overflow-auto p-4 md:p-8 ${activeTerminal ? 'h-1/2' : ''}`}>
-          <div className="max-w-3xl mx-auto">
+          <div className="max-w-6xl mx-auto">
             {/* Board toolbar — task-scoped actions relocated out of the header */}
             <div className="flex items-center gap-2 mb-4">
               <button
