@@ -37,7 +37,7 @@ Agent Dispatcher solves this by providing a task board (parsed from markdown tod
 - Three providers: Claude Code, Gemini CLI, Codex CLI
 - Run modes: Plan, Implement, Audit, Fix, Custom
 - Time limits with stall detection (no output for N minutes)
-- Git branch isolation per agent run
+- Per-run diff: each run is anchored to the commit that was HEAD at launch, so the dashboard can show exactly what an agent changed (committed or not) — without moving the working directory's branch
 - Per-agent USD budget cap (`AC_MAX_BUDGET_USD`, default `$2`) — enforced at spawn time
 - Stop/Kill controls: stop any running or waiting agent; kill stalled agents; nudge agents that have gone quiet
 - Ralph autonomous loop: re-spawns the agent after each exit until `[COMPLETED]` is emitted or human input is needed

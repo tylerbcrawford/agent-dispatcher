@@ -7,6 +7,7 @@ import type { AgentSession, Task, RunMode, ExecutionMode, ProviderId } from '../
 import { taskToSlug } from './prompt-library.js'
 import { config } from './config.js'
 import { buildSpawnCommand } from './providers.js'
+import { captureBaseCommit } from './git.js'
 
 function isExecutableFile(p: string): boolean {
   try {
@@ -83,6 +84,7 @@ export interface SpawnOptions {
   disallowedTools?: string
   cwd?: string
   gitBranch: boolean
+  gitBaseCommit?: string | null   // reused across resume/Ralph so the diff spans the whole run
   resumeId?: string
   forkSession?: boolean
   resumeCount?: number
@@ -121,6 +123,14 @@ export function spawnAgent(opts: SpawnOptions): SpawnedAgent {
   }
 
   const cwd = opts.cwd ?? config.vaultPath
+
+  // Anchor the run's diff to the commit that is HEAD right now (only when the run
+  // opts into git tracking and cwd is a repo). Resume/Ralph pass the original base
+  // through so the diff spans the whole run rather than resetting each iteration.
+  const gitBaseCommit = gitBranch
+    ? (opts.gitBaseCommit ?? captureBaseCommit(cwd))
+    : null
+
   const ptyProcess = pty.spawn(cmd.binary, cmd.args, {
     name: 'xterm-256color',
     cwd,
@@ -149,6 +159,7 @@ export function spawnAgent(opts: SpawnOptions): SpawnedAgent {
     lastOutput: '',
     pendingQuestion: null,
     gitBranch,
+    gitBaseCommit,
     conversationHistory: [],
     originalTaskContext: null,
     verificationReport: null,

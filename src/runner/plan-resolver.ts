@@ -1,6 +1,22 @@
 // src/runner/plan-resolver.ts
 import { existsSync, readFileSync, readdirSync, statSync } from 'fs'
-import { join, basename } from 'path'
+import { join, basename, resolve, relative, isAbsolute } from 'path'
+
+/**
+ * True when `target` resolves inside `root`. A plan link comes over the wire, so a
+ * value like `../../etc/passwd` would otherwise let `join(root, link)` escape the
+ * vault. Rejects `..`-escapes and absolute paths outside root.
+ */
+function isWithin(root: string, target: string): boolean {
+  const rel = relative(resolve(root), resolve(target))
+  return rel === '' || (!rel.startsWith('..') && !isAbsolute(rel))
+}
+
+/** Read a candidate file only if it is contained within `root`. */
+function readIfContained(root: string, filePath: string): string | null {
+  if (!isWithin(root, filePath)) return null
+  return existsSync(filePath) ? readFileSync(filePath, 'utf-8') : null
+}
 
 /**
  * Resolve an Obsidian wiki-link target to file content.
@@ -14,14 +30,16 @@ export function resolvePlanLink(
   vaultPath: string,
   projectFolder: string,
 ): string | null {
-  const directPath = join(vaultPath, `${link}.md`)
-  if (existsSync(directPath)) return readFileSync(directPath, 'utf-8')
+  const direct = readIfContained(vaultPath, join(vaultPath, `${link}.md`))
+  if (direct !== null) return direct
 
   if (projectFolder) {
-    const projectPath = join(projectFolder, `${link}.md`)
-    if (existsSync(projectPath)) return readFileSync(projectPath, 'utf-8')
+    const scoped = readIfContained(projectFolder, join(projectFolder, `${link}.md`))
+    if (scoped !== null) return scoped
   }
 
+  // Recursive search keys on the basename only (path components in `link` are
+  // dropped by basename), so matches are always real files found under vaultPath.
   const target = `${basename(link)}.md`
   const matches = findFilesRecursive(vaultPath, target)
   if (matches.length === 0) return null

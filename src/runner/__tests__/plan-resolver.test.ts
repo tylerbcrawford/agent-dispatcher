@@ -65,4 +65,19 @@ describe('resolvePlanLink', () => {
   it('handles empty project folder', () => {
     expect(resolvePlanLink('archive/example/old-plan', TMP, '')).toContain('Archived Plan')
   })
+
+  it('refuses to escape the vault via ../ in the link (path traversal)', () => {
+    // A secret sits OUTSIDE the vault, next to it.
+    const secret = join(TMP, '../outside-secret.md')
+    writeFileSync(secret, '# TOP SECRET')
+    try {
+      // Direct-path escape is blocked by the containment check...
+      expect(resolvePlanLink('../outside-secret', TMP, PROJECT)).toBeNull()
+      // ...and the basename recursive search only walks inside the vault, so it
+      // never finds a same-named file that lives outside.
+      expect(resolvePlanLink('../../../../../../etc/hostname', TMP, PROJECT)).toBeNull()
+    } finally {
+      rmSync(secret, { force: true })
+    }
+  })
 })

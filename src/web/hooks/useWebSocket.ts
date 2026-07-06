@@ -20,6 +20,8 @@ export function useWebSocket() {
   const [scoring, setScoring] = useState(false)
   const wsRef = useRef<WebSocket | null>(null)
   const reconnectDelay = useRef(1000)
+  const reconnectTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
+  const disposedRef = useRef(false)
   const prevProjectIdsRef = useRef<Set<string>>(new Set())
   const currentProjectRef = useRef(currentProject)
   const showAllProjectsRef = useRef(showAllProjects)
@@ -155,7 +157,10 @@ export function useWebSocket() {
     ws.onclose = () => {
       setConnected(false)
       wsRef.current = null
-      setTimeout(() => {
+      // Don't reconnect after the hook has unmounted — otherwise an unmount (or a
+      // StrictMode dev remount) leaves a zombie socket reconnecting forever.
+      if (disposedRef.current) return
+      reconnectTimer.current = setTimeout(() => {
         reconnectDelay.current = Math.min(reconnectDelay.current * 2, 30_000)
         connect()
       }, reconnectDelay.current)
@@ -165,8 +170,13 @@ export function useWebSocket() {
   }, [])
 
   useEffect(() => {
+    disposedRef.current = false
     connect()
-    return () => wsRef.current?.close()
+    return () => {
+      disposedRef.current = true
+      if (reconnectTimer.current) clearTimeout(reconnectTimer.current)
+      wsRef.current?.close()
+    }
   }, [connect])
 
   const send = useCallback((msg: ClientMessage) => {

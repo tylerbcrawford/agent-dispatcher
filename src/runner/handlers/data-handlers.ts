@@ -1,6 +1,6 @@
 // src/runner/handlers/data-handlers.ts
 import type { ClientMessage, DiffData } from '../../shared/types.js'
-import { execSync } from 'child_process'
+import { runDiff, shortSha } from '../git.js'
 import { parseUnifiedDiff } from '../diff-parser.js'
 import { resolvePlanLink } from '../plan-resolver.js'
 import { taskToSlug } from '../prompt-library.js'
@@ -25,26 +25,29 @@ export function handleRequestConversation(ctx: HandlerContext, msg: Extract<Clie
 
 export function handleRequestDiff(ctx: HandlerContext, msg: Extract<ClientMessage, { type: 'request_diff' }>) {
   const agent = ctx.agents.get(msg.agentId)
-  if (!agent?.session.gitBranch) return
-  const branch = agent.session.gitBranch
-  const baseBranch = 'main'
+  if (!agent) return
+  const branch = agent.session.gitBranch ?? 'run'
+  const baseCommit = agent.session.gitBaseCommit
   const frontmatter = ctx.projectFrontmatters.get(agent.session.projectId)
   const cwd = frontmatter?.['default-cwd'] ?? config.vaultPath
+
+  const empty = { files: [], totalAdditions: 0, totalDeletions: 0 }
+  if (!baseCommit) {
+    // No base captured — the run didn't opt into diff tracking, or cwd wasn't a
+    // git repo at spawn. Report it instead of failing silently.
+    ctx.unicast({ type: 'diff_data', diff: { agentId: msg.agentId, branch, baseBranch: '—', ...empty,
+      error: 'No diff available: this run was launched without git tracking, or its working directory is not a git repository.' } })
+    return
+  }
+
+  const baseBranch = shortSha(baseCommit)
   try {
-    const raw = execSync(`git diff ${baseBranch}...${branch}`, {
-      cwd,
-      timeout: 10_000,
-      encoding: 'utf-8',
-      maxBuffer: 5 * 1024 * 1024,
-    })
-    const files = parseUnifiedDiff(raw)
+    const files = parseUnifiedDiff(runDiff(cwd, baseCommit))
     const totalAdditions = files.reduce((sum, f) => sum + f.additions, 0)
     const totalDeletions = files.reduce((sum, f) => sum + f.deletions, 0)
-    const diff: DiffData = { agentId: msg.agentId, branch, baseBranch, files, totalAdditions, totalDeletions }
-    ctx.unicast({ type: 'diff_data', diff })
+    ctx.unicast({ type: 'diff_data', diff: { agentId: msg.agentId, branch, baseBranch, files, totalAdditions, totalDeletions } })
   } catch (err) {
-    const diff: DiffData = { agentId: msg.agentId, branch, baseBranch, files: [], totalAdditions: 0, totalDeletions: 0, error: String(err) }
-    ctx.unicast({ type: 'diff_data', diff })
+    ctx.unicast({ type: 'diff_data', diff: { agentId: msg.agentId, branch, baseBranch, ...empty, error: String(err) } })
   }
 }
 
