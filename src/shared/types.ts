@@ -66,7 +66,7 @@ export interface Task {
   status: TaskStatus
   description: string     // Paragraph(s) below the fields
   planLink: string | null // e.g. "rate-limiter-plan" (wiki-link target)
-  hasPlan: boolean        // true if a plan file exists for this task (computed in loadTasks)
+  hasPlan?: boolean       // true if a plan file exists; computed in loadTasks, so absent until then
   affects: string[]       // e.g. ["api", "web"]
   depends: number[]       // e.g. [1, 3] — task IDs this depends on
   bucket: Bucket          // Derived from status

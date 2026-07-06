@@ -125,19 +125,23 @@ export default function PrioritiesPage({ projects, send, scoring }: PrioritiesPa
 
   // Pointer drag works on touch devices, where native HTML5 drag events are unreliable.
   function findPointerDropIndex(clientY: number): number | null {
-    let closest: { index: number; distance: number } | null = null
+    // Track index + distance as separate primitives — assigning an object to a
+    // closed-over `let` inside forEach makes TS narrow it to `null` at the return.
+    let bestIndex: number | null = null
+    let bestDistance = Infinity
 
     rowRefs.current.forEach((row, index) => {
       if (!row) return
       const rect = row.getBoundingClientRect()
       const centerY = rect.top + rect.height / 2
       const distance = Math.abs(clientY - centerY)
-      if (!closest || distance < closest.distance) {
-        closest = { index, distance }
+      if (distance < bestDistance) {
+        bestDistance = distance
+        bestIndex = index
       }
     })
 
-    return closest?.index ?? null
+    return bestIndex
   }
 
   function handlePointerDragStart(e: React.PointerEvent, index: number) {
