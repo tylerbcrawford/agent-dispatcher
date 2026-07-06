@@ -212,7 +212,7 @@ export default function PromptsPage({ templates, requestTemplates, send }: Promp
 
           {/* Variable help */}
           <p className="text-xs text-gray-600 mt-2">
-            Available variables: <code className="text-gray-500">${'${name}'}</code> <code className="text-gray-500">${'${description}'}</code> <code className="text-gray-500">${'${projectName}'}</code> <code className="text-gray-500">${'${projectDescription}'}</code> <code className="text-gray-500">${'${projectFolder}'}</code> <code className="text-gray-500">${'${taskSlug}'}</code> <code className="text-gray-500">${'${planContent}'}</code>
+            Available variables: <code className="text-gray-500">{'${name}'}</code> <code className="text-gray-500">{'${description}'}</code> <code className="text-gray-500">{'${projectName}'}</code> <code className="text-gray-500">{'${projectDescription}'}</code> <code className="text-gray-500">{'${projectFolder}'}</code> <code className="text-gray-500">{'${taskSlug}'}</code> <code className="text-gray-500">{'${planContent}'}</code>
           </p>
 
           {/* Action buttons */}

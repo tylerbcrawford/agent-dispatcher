@@ -244,6 +244,15 @@ wss.on('connection', (ws) => {
     clients.delete(ws)
     console.log(`Client disconnected (${clients.size} remaining)`)
   })
+
+  // The web container is recreated on every frontend deploy, which resets the
+  // proxied connection mid-flight. Without this handler the resulting 'error'
+  // event is unhandled and the ws EventEmitter throws, crashing the whole runner
+  // (and suspending every live agent). Log and drop the one client instead.
+  ws.on('error', (err) => {
+    console.error('Client socket error:', err)
+    clients.delete(ws)
+  })
 })
 
 server.listen(socketPath, () => {

@@ -26,9 +26,18 @@ Agent Dispatcher spawns CLI agents with real filesystem and shell access, so cre
 
 If you find a case where a credential is inadvertently exposed, please report it immediately.
 
+## Trust Model
+
+The dashboard has **no built-in authentication** and spawns agents with real shell/filesystem access. It is meant to run bound to `127.0.0.1` (the web container does this by default) behind a reverse proxy or VPN that authenticates. Anyone who can reach the UI — or the runner's Unix socket — can spawn a shell-capable agent. See the "Security model" section of the README for deployment guidance.
+
 ## Permission Profiles
 
-Agent runs are scoped by permission profile (`permissions/`). Treat a profile bypass or misconfiguration as a security issue, not a regular bug — report it through the channel above.
+Agent runs are scoped by permission profile (`permissions/`):
+
+- **`read-only` and `plan` are hard boundaries.** They deny `Bash` (and other write/network tools) via Claude Code's `--disallowedTools`, which overrides inherited allow rules. Use these for untrusted tasks. A restricted run that nonetheless writes files or runs shell commands **is a security bug** — report it.
+- **`standard`/`full-access` are write-capable by design.** Their per-command "blocked" lists become best-effort `--disallowedTools "Bash(<cmd>:*)"` rules. Claude Code's argument-level Bash matching is deliberately fragile (bypassable via spacing, shell variables, or quoting), so these stop the naive invocation but are **not** a sandbox — do not run untrusted input under these profiles. This limitation is expected behavior, not a vulnerability.
+
+Treat a bypass of the `read-only`/`plan` boundary, or a profile *misconfiguration*, as a security issue — report it through the channel above.
 
 ## Supported Versions
 

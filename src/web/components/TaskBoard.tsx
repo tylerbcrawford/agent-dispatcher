@@ -68,7 +68,10 @@ export default function TaskBoard({ tasks, agents, queue, send, currentProject, 
   const [defaultMode, setDefaultMode] = useState<'plan' | 'implement'>('implement')
   const [editTask, setEditTask] = useState<Task | null>(null)
   const [filters, setFilters] = useState<TaskFilters>(DEFAULT_FILTERS)
-  const [selectedIds, setSelectedIds] = useState<Set<number>>(new Set())
+  // Keyed by composite `${projectId}-${id}` (taskKey), NOT bare task id — in the
+  // All-Projects view several projects can share a numeric id, and a bare-id set
+  // would select/delete the wrong project's task.
+  const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set())
   const [confirmBulkDelete, setConfirmBulkDelete] = useState(false)
   const [doneExpanded, setDoneExpanded] = useState(false)
   const [expandedTaskId, setExpandedTaskId] = useState<string | null>(null)
@@ -134,18 +137,29 @@ export default function TaskBoard({ tasks, agents, queue, send, currentProject, 
   }
 
 
-  function toggleSelect(taskId: number) {
+  function toggleSelect(key: string) {
     setSelectedIds(prev => {
       const next = new Set(prev)
-      if (next.has(taskId)) next.delete(taskId)
-      else next.add(taskId)
+      if (next.has(key)) next.delete(key)
+      else next.add(key)
       return next
     })
   }
 
   function handleBulkDelete() {
     if (selectedIds.size === 0) return
-    send({ type: 'delete_tasks', projectId: currentProject, taskIds: [...selectedIds] })
+    // Group selected tasks by their real project (selection spans projects in the
+    // All-Projects view), then emit one delete_tasks per project.
+    const byProject = new Map<string, number[]>()
+    for (const t of tasks) {
+      if (!selectedIds.has(taskKey(t))) continue
+      const ids = byProject.get(t.projectId) ?? []
+      ids.push(t.id)
+      byProject.set(t.projectId, ids)
+    }
+    for (const [projectId, taskIds] of byProject) {
+      send({ type: 'delete_tasks', projectId, taskIds })
+    }
     setSelectedIds(new Set())
     onExitSelectionMode()
     setConfirmBulkDelete(false)
@@ -176,8 +190,8 @@ export default function TaskBoard({ tasks, agents, queue, send, currentProject, 
         onMarkDone={() => send({ type: 'update_task', projectId: task.projectId, taskId: task.id, patch: { status: 'done' } })}
         onRestore={() => send({ type: 'update_task', projectId: task.projectId, taskId: task.id, patch: { status: 'ready' } })}
         selectionMode={selectionMode}
-        selected={selectedIds.has(task.id)}
-        onToggleSelect={() => toggleSelect(task.id)}
+        selected={selectedIds.has(taskKey(task))}
+        onToggleSelect={() => toggleSelect(taskKey(task))}
         projectLabel={showAllProjects ? (() => {
           const proj = projects.find(p => p.id === task.projectId)
           return proj ? proj.name : undefined

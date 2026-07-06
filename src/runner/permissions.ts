@@ -40,7 +40,7 @@ export function parseProfile(content: string): ParsedProfile {
     description: meta.description ?? '',
     tools: parseToolsList(body),
     allowedCommands: parseListItems(body, 'Bash Commands \\(auto-approved\\)'),
-    blockedCommands: parseListItems(body, 'Blocked Commands \\(always denied\\)'),
+    blockedCommands: parseListItems(body, 'Blocked Commands \\(best-effort deny\\)'),
   }
 }
 
@@ -76,15 +76,36 @@ export function toAllowedTools(profile: ParsedProfile): string[] {
 const RESTRICTABLE_TOOLS = ['Bash', 'Write', 'Edit', 'MultiEdit', 'NotebookEdit', 'WebFetch', 'WebSearch', 'Task', 'Agent', 'mcp__*', 'SlashCommand']
 
 /**
+ * Best-effort deny rules for a profile's `blockedCommands`. Emitted for EVERY
+ * profile, including write-capable ones — a write-capable profile grants an
+ * unscoped Bash allow, so without these the "Blocked Commands" list is decorative
+ * and the command runs auto-approved.
+ *
+ * IMPORTANT — this is defense-in-depth, not a sandbox. Claude Code's argument-level
+ * Bash matching is deliberately fragile: `Bash(rm -rf /:*)` is bypassable via extra
+ * spaces (`rm  -rf /`), shell variables (`R=/ && rm -rf $R`), or quoting. It stops
+ * the naive invocation and nothing more. The real containment boundaries are (a) the
+ * read-only / plan profiles, which deny Bash wholesale, and (b) running the dashboard
+ * behind authentication on localhost. See the security notes in SECURITY.md.
+ */
+function blockedCommandDenials(profile: ParsedProfile): string[] {
+  // Two forms per command: exact (`Bash(cmd)`) and prefix-with-args (`Bash(cmd:*)`).
+  return profile.blockedCommands.flatMap(cmd => [`Bash(${cmd})`, `Bash(${cmd}:*)`])
+}
+
+/**
  * Tools to pass to Claude's `--disallowedTools` for a profile. A profile that
  * grants both Bash and Write is treated as write-capable (standard,
- * full-access) and left unrestricted. Any more restrictive profile (read-only,
- * plan) denies every restrictable tool it does not explicitly grant — so
- * read-only denies all of them, while plan keeps Write (to save plan files) but
- * still denies Bash/Edit/etc.
+ * full-access): its restrictable-tool allowlist is left unrestricted, but its
+ * `blockedCommands` are still denied (best-effort — see above). Any more
+ * restrictive profile (read-only, plan) additionally denies every restrictable
+ * tool it does not explicitly grant — so read-only denies all of them, while
+ * plan keeps Write (to save plan files) but still denies Bash/Edit/etc.
  */
 export function toDisallowedTools(profile: ParsedProfile): string[] {
   const writeCapable = profile.tools.includes('Bash') && profile.tools.includes('Write')
-  if (writeCapable) return []
-  return RESTRICTABLE_TOOLS.filter(tool => !profile.tools.includes(tool))
+  const toolDenials = writeCapable
+    ? []
+    : RESTRICTABLE_TOOLS.filter(tool => !profile.tools.includes(tool))
+  return [...toolDenials, ...blockedCommandDenials(profile)]
 }
