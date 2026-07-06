@@ -193,7 +193,8 @@ export interface AgentSession {
   resumeCount: number
   lastOutput: string             // Last ~500 chars
   pendingQuestion: string | null
-  gitBranch: string | null       // e.g. "agent/1-api-key-rotation"
+  gitBranch: string | null       // display label for the run, e.g. "agent/1-api-key-rotation"
+  gitBaseCommit?: string | null  // HEAD sha captured at spawn; the diff is base -> working tree
   conversationHistory: ConversationEntry[]
   originalTaskContext: {
     taskName: string
