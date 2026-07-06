@@ -24,6 +24,11 @@ const defaultProps = {
   onRestore: vi.fn(),
   expanded: false,
   onToggle: vi.fn(),
+  send: vi.fn(),
+  onViewTerminal: vi.fn(),
+  diffs: {},
+  requestDiff: vi.fn(),
+  projects: [],
 }
 
 describe('TaskCard', () => {

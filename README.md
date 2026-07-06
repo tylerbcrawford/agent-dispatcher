@@ -1,5 +1,7 @@
 # Agent Dispatcher
 
+[![CI](https://github.com/tylerbcrawford/agent-dispatcher/actions/workflows/ci.yml/badge.svg)](https://github.com/tylerbcrawford/agent-dispatcher/actions/workflows/ci.yml)
+
 A web dashboard for orchestrating headless AI coding agents. Spawn, monitor, and manage Claude Code, Gemini CLI, and Codex CLI agents from a unified task board with live terminal output, human-in-the-loop Q&A, and a composable prompt library.
 
 Built as a personal tool for managing concurrent AI agents across multiple projects — designed for developers who run headless CLI agents and need visibility into what they're doing.
