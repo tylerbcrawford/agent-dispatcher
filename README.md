@@ -16,7 +16,9 @@ Running headless Claude Code agents is powerful, but managing multiple agents ac
 - Agent questions go unanswered because there's no notification system
 - Switching between terminal sessions to monitor progress doesn't scale
 
-Agent Dispatcher solves this by providing a task board (parsed from markdown todo files), a spawn dialog with a composable prompt library, and a real-time agent panel with terminal output — all in one dashboard.
+Agent Dispatcher solves this by providing a task board (parsed from markdown todo files), a spawn dialog with a composable prompt library, and a real-time agent panel with terminal output, in one dashboard.
+
+> Built with Claude Code — this project is itself designed, written, and operated with the kind of headless agents it orchestrates.
 
 ## Features
 
@@ -54,7 +56,7 @@ Agent Dispatcher solves this by providing a task board (parsed from markdown tod
 **Prompt Library**
 - 4-layer composable system: base templates, variants, snippets, task-specific
 - Templates use `${variable}` interpolation for task context
-- Snippets are toggleable additions (e.g., "backup first", "docker safety")
+- Snippets are toggleable additions (e.g., "backup first", "commit per service")
 - Per-provider model hints for behavioral guidance
 - Custom overrides without modifying base templates
 
@@ -108,15 +110,22 @@ npm install
 
 # Configure
 cp .env.example .env
-# Edit .env — set AC_VAULT_PATH to your todo file directory
+# Edit .env — set AC_VAULT_PATH to your todo directory (auto-registration watches
+# its `projects/` subdirectory), and set AC_SERVER_PORT=3101 for local dev.
 
-# Development
-npm run dev:runner    # Start the agent runner (host)
-npm run dev:web       # Start the Vite dev server (frontend)
+# Development — three processes (run each in its own terminal)
+npm run dev:runner    # 1. Agent runner (host process, spawns agents via PTY)
+npm run dev:server    # 2. WebSocket proxy on AC_SERVER_PORT (3101)
+npm run dev:web       # 3. Vite dev server (frontend) on 3100, proxies /ws → 3101
 
 # Tests
 npm test
 ```
+
+> **Dev topology:** the browser talks to Vite (`:3100`), which proxies `/ws` to the
+> Express **proxy** (`src/server`, `:3101`), which relays over a Unix socket to the
+> **runner**. All three must run, or the dashboard shows "Disconnected." In
+> production the proxy serves the built SPA directly on `:3100` (no Vite) — see below.
 
 ### Production
 
@@ -128,6 +137,17 @@ npm run build
 # Start Docker web container
 docker compose up -d agent-dispatcher-web
 ```
+
+## Security model
+
+Agent Dispatcher spawns CLI agents with **real filesystem and shell access**, and the dashboard has **no built-in authentication**. Design your deployment around that:
+
+- **Localhost by default.** The web container binds `127.0.0.1:3100` — it is not reachable from the network as shipped. Do not publish the port directly.
+- **Put auth in front for remote access.** To reach the dashboard remotely, front it with a reverse proxy that authenticates (OAuth2 proxy, Basic auth, a VPN/Tailscale, an SSH tunnel). Anyone who reaches the UI can spawn a shell-capable agent.
+- **Permission profiles are the containment boundary — with a caveat.** `read-only` and `plan` deny `Bash` (and other write/network tools) wholesale via Claude Code's `--disallowedTools`, which override inherited allows. `standard`/`full-access` are write-capable by design; their per-command "blocked" lists are **best-effort** deny rules (Claude Code's argument-level Bash matching is bypassable via spacing/quoting), not a sandbox. Run untrusted tasks under `read-only`/`plan`.
+- **The runner's Unix socket is trusted.** Any local process that can reach `AC_UNIX_SOCKET` can spawn agents as the runner user. Keep the runtime directory private (`RuntimeDirectoryMode=0700`).
+
+See [SECURITY.md](SECURITY.md) for the reporting process and the full trust model.
 
 ### Todo File Format
 
@@ -169,8 +189,7 @@ src/
   shared/          # TypeScript types
   web/             # React frontend
     components/    # 25 React components
-    hooks/         # Custom hooks (WebSocket, preferences)
-    lib/           # Shared utilities
+    hooks/         # Custom hooks (useWebSocket)
 prompts/           # Prompt library (markdown templates)
 permissions/       # Permission profiles
 ```

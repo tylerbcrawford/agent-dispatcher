@@ -6,14 +6,29 @@ interface Props {
   pulse?: boolean
 }
 
+// Static text->bg map. The pulse dot needs a `bg-*` class, but deriving it at
+// runtime (`color.replace('text-','bg-')`) hides the class from Tailwind's JIT
+// scanner, so it never gets generated and the dot renders invisible. Every value
+// here is a literal string the scanner can see. Add an entry when a new `color`
+// is passed with `pulse`.
+const TEXT_TO_BG: Record<string, string> = {
+  'text-red-400': 'bg-red-400',
+  'text-blue-400': 'bg-blue-400',
+  'text-green-400': 'bg-green-400',
+  'text-yellow-400': 'bg-yellow-400',
+  'text-gray-400': 'bg-gray-400',
+  'text-gray-600': 'bg-gray-600',
+}
+
 export default function StatusIndicator({ color, shape = 'circle', size = 'sm', pulse = false }: Props) {
   const px = size === 'sm' ? 8 : 12
 
   if (pulse) {
+    const bg = TEXT_TO_BG[color] ?? 'bg-gray-400'
     return (
       <span className="relative flex flex-shrink-0" style={{ width: px, height: px }}>
-        <span className={`animate-ping absolute inline-flex h-full w-full rounded-full ${color.replace('text-', 'bg-')} opacity-75`} />
-        <span className={`relative inline-flex rounded-full h-full w-full ${color.replace('text-', 'bg-')}`} />
+        <span className={`animate-ping absolute inline-flex h-full w-full rounded-full ${bg} opacity-75`} />
+        <span className={`relative inline-flex rounded-full h-full w-full ${bg}`} />
       </span>
     )
   }

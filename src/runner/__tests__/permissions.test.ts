@@ -1,8 +1,8 @@
 import { describe, it, expect } from 'vitest'
 import { toDisallowedTools, type ParsedProfile } from '../permissions.js'
 
-function profile(name: string, tools: string[]): ParsedProfile {
-  return { name, description: '', tools, allowedCommands: [], blockedCommands: [] }
+function profile(name: string, tools: string[], blockedCommands: string[] = []): ParsedProfile {
+  return { name, description: '', tools, allowedCommands: [], blockedCommands }
 }
 
 describe('toDisallowedTools (enforce permission profiles for Claude)', () => {
@@ -52,9 +52,30 @@ describe('toDisallowedTools (enforce permission profiles for Claude)', () => {
   })
 
   it('does not deny MCP/slash for write-capable profiles', () => {
-    // trusted profiles stay unrestricted (empty disallow list)
+    // trusted profiles stay unrestricted (no restrictable-tool denials)
     const d = toDisallowedTools(profile('standard', ['Bash', 'Read', 'Write', 'Edit', 'Glob', 'Grep']))
     expect(d).not.toContain('mcp__*')
     expect(d).not.toContain('SlashCommand')
+  })
+
+  it('emits best-effort Bash deny rules for blockedCommands, even on write-capable profiles', () => {
+    // Regression: standard grants an unscoped Bash allow, so a blockedCommands
+    // list that produced no deny rules was decorative — the command ran approved.
+    const d = toDisallowedTools(
+      profile('standard', ['Bash', 'Read', 'Write', 'Edit', 'Glob', 'Grep'], ['docker compose down', 'rm -rf /']),
+    )
+    expect(d).toContain('Bash(docker compose down)')
+    expect(d).toContain('Bash(docker compose down:*)')
+    expect(d).toContain('Bash(rm -rf /)')
+    expect(d).toContain('Bash(rm -rf /:*)')
+    // still no restrictable-tool denials — it's write-capable
+    expect(d).not.toContain('Write')
+    expect(d).not.toContain('mcp__*')
+  })
+
+  it('combines restrictable-tool denials with blockedCommand denials on restricted profiles', () => {
+    const d = toDisallowedTools(profile('read-only', ['Read', 'Glob', 'Grep'], ['curl evil.com']))
+    expect(d).toContain('Bash')            // tool-level denial
+    expect(d).toContain('Bash(curl evil.com:*)') // command-level denial
   })
 })

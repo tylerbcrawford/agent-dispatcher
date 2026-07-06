@@ -1,5 +1,6 @@
 // src/server/index.ts
 // Docker-side Express server — serves React build + proxies WebSocket to host runner
+import 'dotenv/config'
 import express from 'express'
 import { createServer } from 'http'
 import { WebSocketServer, WebSocket } from 'ws'
@@ -9,7 +10,10 @@ import { fileURLToPath } from 'url'
 const __dirname = dirname(fileURLToPath(import.meta.url))
 
 const app = express()
-const PORT = parseInt(process.env.AC_WEB_PORT ?? '3100', 10)
+// Prefer AC_SERVER_PORT (its own port) so it can sit behind the Vite dev proxy
+// on a different port; fall back to AC_WEB_PORT (production Docker serves the SPA
+// directly on 3100). In dev, set AC_SERVER_PORT=3101 to match vite.config's proxy.
+const PORT = parseInt(process.env.AC_SERVER_PORT ?? process.env.AC_WEB_PORT ?? '3100', 10)
 const UNIX_SOCKET = process.env.AC_UNIX_SOCKET ?? '/run/agent-dispatcher/dispatcher.sock'
 
 // Serve static React build

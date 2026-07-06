@@ -12,7 +12,14 @@ description: Standard profile for implementation and fix tasks
 - `git add . && git commit`
 - `git push origin main`
 
-## Blocked Commands (always denied)
+## Blocked Commands (best-effort deny)
+<!--
+These become `--disallowedTools "Bash(<cmd>:*)"` deny rules. Claude Code's
+argument-level Bash matching is deliberately fragile (bypassable via extra
+spaces, shell variables, or quoting), so treat this as defense-in-depth against
+the naive invocation — NOT a sandbox. Real containment = the read-only/plan
+profiles (which deny Bash wholesale) plus running behind auth on localhost.
+-->
 - `docker compose down` (no service)
 - `rm -rf /`
 - `docker compose stop` (no service)

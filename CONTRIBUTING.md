@@ -27,10 +27,11 @@ Thanks for your interest in contributing. This guide covers what you need to get
 
 ```bash
 npm run dev:runner    # Agent runner (host process, needs PTY/filesystem access)
-npm run dev:web       # Vite dev server (frontend)
+npm run dev:server    # WebSocket proxy (Express, src/server) on AC_SERVER_PORT=3101
+npm run dev:web       # Vite dev server (frontend) on 3100, proxies /ws → 3101
 ```
 
-The runner and frontend communicate over a Unix socket via the Express proxy in `src/server/`. Both need to be running for a full local session.
+The runner and frontend communicate over a Unix socket via the Express proxy in `src/server/`. **All three** processes need to be running for a full local session — the browser (Vite `:3100`) proxies `/ws` to the proxy (`:3101`), which relays over the Unix socket to the runner. Set `AC_SERVER_PORT=3101` in `.env` so the proxy doesn't collide with Vite.
 
 ### Project Structure
 
