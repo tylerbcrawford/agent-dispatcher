@@ -6,6 +6,8 @@ A web dashboard for orchestrating headless AI coding agents. Spawn, monitor, and
 
 Built as a personal tool for managing concurrent AI agents across multiple projects — designed for developers who run headless CLI agents and need visibility into what they're doing.
 
+> **Built with Claude Code.** I set the requirements and the architecture, made the design decisions, and run it in production on my VPS. The agent wrote most of the code under my direction.
+
 ![Task board — markdown todo files parsed into a bucketed board](docs/screenshots/task-board.png)
 ![Launch Agent — spawn dialog with provider, model, run mode, and permission profile](docs/screenshots/spawn-dialog.png)
 ![Composable prompt library — editable base templates per run mode](docs/screenshots/prompt-library.png)
@@ -19,8 +21,6 @@ Running headless Claude Code agents is powerful, but managing multiple agents ac
 - Switching between terminal sessions to monitor progress doesn't scale
 
 Agent Dispatcher solves this by providing a task board (parsed from markdown todo files), a spawn dialog with a composable prompt library, and a real-time agent panel with terminal output, in one dashboard.
-
-> Built with Claude Code — this project is itself designed, written, and operated with the kind of headless agents it orchestrates.
 
 ## Features
 
